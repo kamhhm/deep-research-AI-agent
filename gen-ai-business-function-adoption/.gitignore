@@ -1,0 +1,51 @@
+# API Keys and Secrets
+**/api_key.txt
+*.key
+*.secret
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Large data files
+*.csv
+!data/*.csv.sample
+
+# Batch processing files (large)
+batch_files/**/*.jsonl
+batch_files/**/*.txt
+batch_files/results/*
+
+# Results and outputs (large)
+results/*.csv
+results/*.jsonl
+results/jsonl/*
+
+# Generated dashboards (keep main dashboard, exclude others)
+# insights/*.html
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+
