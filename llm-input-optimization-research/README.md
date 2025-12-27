@@ -141,5 +141,3 @@ The analysis produces:
 3. **Disagreement Analysis:** Detailed breakdown of cases where classifications differ
 
 ---
-
-**For implementation details and step-by-step instructions, see `QUICK_START.md`**
