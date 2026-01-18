@@ -17,6 +17,7 @@ ENV/
 # Large data files
 *.csv
 !data/*.csv.sample
+!insights/genai_classifications_combined.csv
 
 # Batch processing files (large)
 batch_files/**/*.jsonl

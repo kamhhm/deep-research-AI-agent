@@ -31,17 +31,6 @@ wheels/
 # Jupyter Notebooks
 .ipynb_checkpoints
 
-# Large Data Files & Artifacts
-*.csv
-*.jsonl
-*.json
-!insights/01_Presentation_Materials/charts/analysis_metrics.json
-!insights/03_Data_Files/summary_metrics.json
-!test_100_startups/test_100_startups.csv
-batch_files/
-processing/output/
-processing/batch_files/
-
 # MacOS
 .DS_Store
 
