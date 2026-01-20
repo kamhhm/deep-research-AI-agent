@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from .config import PROCESSING
+from .config import PROCESSING, APIKeys
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -336,15 +336,16 @@ async def search_tavily(
     Args:
         company_name: Name of the company to search for.
         homepage_url: Company's website (helps with disambiguation).
-        api_key: Tavily API key. Uses env var if not provided.
+        api_key: Tavily API key. Uses credentials folder or env var if not provided.
         max_results: Maximum number of results to return.
     
     Returns:
         TavilySearchResult with snippets and AI mention detection.
     """
-    import os
+    if not api_key:
+        keys = APIKeys()
+        api_key = keys.tavily
     
-    api_key = api_key or os.getenv("TAVILY_API_KEY")
     if not api_key:
         return TavilySearchResult(
             company_name=company_name,
@@ -352,7 +353,7 @@ async def search_tavily(
             snippets=[],
             ai_keywords_found=[],
             has_ai_mentions=False,
-            error="TAVILY_API_KEY not set"
+            error="Tavily API key not set. Add to credentials/tavily_api_key.txt"
         )
     
     query = build_search_query(company_name, homepage_url)
@@ -616,10 +617,12 @@ async def classify_company(
     Returns:
         PresenceAssessment with scores, signals, and routing decision.
     """
-    import os
     import json
     
-    api_key = api_key or os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        keys = APIKeys()
+        api_key = keys.openai
+    
     if not api_key:
         return PresenceAssessment(
             company_name=company_name,
@@ -629,7 +632,7 @@ async def classify_company(
             ai_signals=[],
             recommended_stage="stop",
             routing_reasoning="",
-            error="OPENAI_API_KEY not set"
+            error="OpenAI API key not set. Add to credentials/openai_api_key.txt"
         )
     
     user_prompt = _build_classifier_prompt(
