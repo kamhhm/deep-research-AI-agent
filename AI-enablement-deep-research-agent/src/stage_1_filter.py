@@ -209,3 +209,258 @@ def check_websites_batch_sync(urls: list[str]) -> list[WebsiteStatus]:
     Synchronous wrapper for check_websites_batch.
     """
     return asyncio.run(check_websites_batch(urls))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAVILY SEARCH
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class SearchSnippet:
+    """A single search result snippet."""
+    title: str
+    url: str
+    content: str
+    score: float = 0.0
+
+
+@dataclass
+class TavilySearchResult:
+    """
+    Result from a Tavily search for AI mentions.
+    
+    Attributes:
+        company_name: The company we searched for.
+        query: The exact query used.
+        snippets: List of relevant search result snippets.
+        ai_keywords_found: AI-related keywords found in snippets.
+        has_ai_mentions: Quick boolean - did we find any AI mentions?
+        error: Error message if search failed.
+    """
+    company_name: str
+    query: str
+    snippets: list[SearchSnippet]
+    ai_keywords_found: list[str]
+    has_ai_mentions: bool
+    raw_response: Optional[dict] = None
+    error: Optional[str] = None
+
+
+# AI-related keywords to look for in search results
+AI_KEYWORDS = [
+    # GenAI tools
+    "chatgpt", "gpt-4", "gpt-5", "openai", "claude", "anthropic",
+    "copilot", "github copilot", "gemini", "bard",
+    # General AI terms
+    "generative ai", "genai", "gen ai", "large language model", "llm",
+    "ai assistant", "ai-powered", "ai powered", "artificial intelligence",
+    "machine learning", "ml model",
+    # AI adoption signals
+    "uses ai", "using ai", "adopted ai", "implementing ai",
+    "ai tools", "ai platform", "ai solution",
+    # Specific use cases
+    "ai automation", "ai chatbot", "ai customer service",
+    "ai content", "ai writing", "ai coding",
+]
+
+
+def build_search_query(company_name: str, homepage_url: Optional[str] = None) -> str:
+    """
+    Build an optimized search query for finding GenAI adoption evidence.
+    
+    The query is designed to find:
+    - News about the company using AI tools
+    - Blog posts or announcements about AI adoption
+    - Job postings mentioning AI tools
+    
+    Args:
+        company_name: Name of the company.
+        homepage_url: Company's website URL (used to extract domain).
+    
+    Returns:
+        Search query string.
+    """
+    # Extract domain if available (helps with disambiguation)
+    domain_hint = ""
+    if homepage_url:
+        try:
+            domain = urlparse(homepage_url).netloc.replace("www.", "")
+            if domain:
+                domain_hint = f" site:{domain} OR"
+        except Exception:
+            pass
+    
+    # Build query: company name + AI-related terms
+    # We use OR to cast a wide net while keeping it focused
+    query = (
+        f'"{company_name}"{domain_hint} '
+        f'(ChatGPT OR "AI tools" OR "generative AI" OR Copilot OR '
+        f'"artificial intelligence" OR "machine learning" OR "AI-powered")'
+    )
+    
+    return query
+
+
+def _extract_ai_keywords(text: str) -> list[str]:
+    """
+    Extract AI-related keywords found in text.
+    
+    Args:
+        text: Text to search for keywords.
+    
+    Returns:
+        List of found keywords (deduplicated, lowercase).
+    """
+    text_lower = text.lower()
+    found = set()
+    
+    for keyword in AI_KEYWORDS:
+        if keyword.lower() in text_lower:
+            found.add(keyword.lower())
+    
+    return sorted(found)
+
+
+async def search_tavily(
+    company_name: str,
+    homepage_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    max_results: int = 5
+) -> TavilySearchResult:
+    """
+    Search Tavily for AI adoption mentions about a company.
+    
+    This is a controlled, single search per company to ensure
+    predictable costs (~$0.001 per search).
+    
+    Args:
+        company_name: Name of the company to search for.
+        homepage_url: Company's website (helps with disambiguation).
+        api_key: Tavily API key. Uses env var if not provided.
+        max_results: Maximum number of results to return.
+    
+    Returns:
+        TavilySearchResult with snippets and AI mention detection.
+    """
+    import os
+    
+    api_key = api_key or os.getenv("TAVILY_API_KEY")
+    if not api_key:
+        return TavilySearchResult(
+            company_name=company_name,
+            query="",
+            snippets=[],
+            ai_keywords_found=[],
+            has_ai_mentions=False,
+            error="TAVILY_API_KEY not set"
+        )
+    
+    query = build_search_query(company_name, homepage_url)
+    
+    async with httpx.AsyncClient(timeout=PROCESSING.api_timeout) as client:
+        try:
+            response = await client.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": api_key,
+                    "query": query,
+                    "search_depth": "basic",  # "basic" is cheaper than "advanced"
+                    "max_results": max_results,
+                    "include_answer": False,  # We don't need summarization
+                    "include_raw_content": False,  # Keep response small
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            # Parse results into snippets
+            snippets = []
+            all_text = ""
+            
+            for result in data.get("results", []):
+                snippet = SearchSnippet(
+                    title=result.get("title", ""),
+                    url=result.get("url", ""),
+                    content=result.get("content", ""),
+                    score=result.get("score", 0.0),
+                )
+                snippets.append(snippet)
+                all_text += f" {snippet.title} {snippet.content}"
+            
+            # Extract AI keywords from all text
+            ai_keywords = _extract_ai_keywords(all_text)
+            
+            return TavilySearchResult(
+                company_name=company_name,
+                query=query,
+                snippets=snippets,
+                ai_keywords_found=ai_keywords,
+                has_ai_mentions=len(ai_keywords) > 0,
+                raw_response=data,
+            )
+            
+        except httpx.HTTPStatusError as e:
+            return TavilySearchResult(
+                company_name=company_name,
+                query=query,
+                snippets=[],
+                ai_keywords_found=[],
+                has_ai_mentions=False,
+                error=f"HTTP {e.response.status_code}: {e.response.text[:100]}"
+            )
+        except Exception as e:
+            return TavilySearchResult(
+                company_name=company_name,
+                query=query,
+                snippets=[],
+                ai_keywords_found=[],
+                has_ai_mentions=False,
+                error=f"{type(e).__name__}: {str(e)[:100]}"
+            )
+
+
+async def search_tavily_batch(
+    companies: list[tuple[str, Optional[str]]],  # (name, homepage_url)
+    api_key: Optional[str] = None,
+    max_concurrent: int = 5  # Tavily rate limits are stricter
+) -> list[TavilySearchResult]:
+    """
+    Search Tavily for multiple companies concurrently.
+    
+    Args:
+        companies: List of (company_name, homepage_url) tuples.
+        api_key: Tavily API key.
+        max_concurrent: Maximum simultaneous requests (default 5 for Tavily).
+    
+    Returns:
+        List of TavilySearchResult in same order as input.
+    """
+    semaphore = asyncio.Semaphore(max_concurrent)
+    
+    async def search_with_semaphore(name: str, url: Optional[str]) -> TavilySearchResult:
+        async with semaphore:
+            return await search_tavily(name, url, api_key)
+    
+    tasks = [search_with_semaphore(name, url) for name, url in companies]
+    return await asyncio.gather(*tasks)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAVILY SYNC WRAPPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def search_tavily_sync(
+    company_name: str,
+    homepage_url: Optional[str] = None,
+    api_key: Optional[str] = None
+) -> TavilySearchResult:
+    """Synchronous wrapper for search_tavily."""
+    return asyncio.run(search_tavily(company_name, homepage_url, api_key))
+
+
+def search_tavily_batch_sync(
+    companies: list[tuple[str, Optional[str]]],
+    api_key: Optional[str] = None
+) -> list[TavilySearchResult]:
+    """Synchronous wrapper for search_tavily_batch."""
+    return asyncio.run(search_tavily_batch(companies, api_key))
