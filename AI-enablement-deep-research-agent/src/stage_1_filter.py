@@ -464,3 +464,363 @@ def search_tavily_batch_sync(
 ) -> list[TavilySearchResult]:
     """Synchronous wrapper for search_tavily_batch."""
     return asyncio.run(search_tavily_batch(companies, api_key))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GPT-4o-mini CLASSIFIER
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class PresenceAssessment:
+    """
+    GPT-4o-mini's assessment of a company's online presence and AI signals.
+    
+    This is the output of Stage 1 and determines routing to subsequent stages.
+    """
+    company_name: str
+    
+    # Presence assessment
+    online_presence_score: int  # 0-100
+    presence_reasoning: str
+    
+    # AI signal detection
+    ai_mentions_found: bool
+    ai_signals: list[str]  # Specific signals found (e.g., "mentions ChatGPT in blog")
+    
+    # Routing decision
+    recommended_stage: str  # "2A", "2B", "3", or "stop"
+    routing_reasoning: str
+    
+    # Metadata
+    error: Optional[str] = None
+
+
+# System prompt for the classifier
+CLASSIFIER_SYSTEM_PROMPT = """You are an AI research assistant helping identify evidence of GenAI adoption in business operations.
+
+Your task: Analyze the provided information about a company and assess:
+1. Their online presence (how much information is available about them)
+2. Whether there are any signals they might be using GenAI tools internally
+
+IMPORTANT DISTINCTIONS:
+- We care about INTERNAL GenAI usage (using ChatGPT for customer support, Copilot for coding, AI for content generation)
+- We do NOT care about companies that BUILD AI products - we want companies that USE AI tools
+- A company selling "AI-powered analytics" is NOT what we're looking for
+- A company using "ChatGPT to respond to customer emails" IS what we're looking for
+
+Respond with a JSON object containing your assessment."""
+
+
+def _build_classifier_prompt(
+    company_name: str,
+    company_description: Optional[str],
+    website_status: WebsiteStatus,
+    search_result: TavilySearchResult
+) -> str:
+    """
+    Build the user prompt for the classifier.
+    
+    Combines all available information into a structured prompt.
+    """
+    # Website status section
+    if website_status.is_alive:
+        website_info = f"Website ({website_status.url}): ACTIVE (responded with {website_status.status_code})"
+        if website_status.is_redirect:
+            website_info += f"\n  → Redirected to: {website_status.final_url}"
+    else:
+        website_info = f"Website: INACTIVE or UNREACHABLE ({website_status.error})"
+    
+    # Search results section
+    if search_result.error:
+        search_info = f"Search failed: {search_result.error}"
+    elif not search_result.snippets:
+        search_info = "Search returned no results."
+    else:
+        search_info = f"Search found {len(search_result.snippets)} results:\n"
+        for i, snippet in enumerate(search_result.snippets[:5], 1):
+            search_info += f"\n{i}. {snippet.title}\n"
+            search_info += f"   URL: {snippet.url}\n"
+            search_info += f"   Content: {snippet.content[:300]}...\n"
+    
+    # AI keywords found
+    if search_result.ai_keywords_found:
+        ai_keywords_info = f"AI-related keywords detected: {', '.join(search_result.ai_keywords_found)}"
+    else:
+        ai_keywords_info = "No AI-related keywords detected in search results."
+    
+    prompt = f"""## Company: {company_name}
+
+### Company Description (from Crunchbase)
+{company_description or "No description available."}
+
+### Website Status
+{website_info}
+
+### Web Search Results
+Query: {search_result.query}
+{search_info}
+
+### AI Keyword Analysis
+{ai_keywords_info}
+
+---
+
+Based on this information, provide your assessment as JSON:
+
+```json
+{{
+  "online_presence_score": <0-100>,
+  "presence_reasoning": "<brief explanation of score>",
+  "ai_mentions_found": <true/false>,
+  "ai_signals": ["<specific signal 1>", "<specific signal 2>", ...],
+  "recommended_stage": "<2A|2B|stop>",
+  "routing_reasoning": "<why this routing decision>"
+}}
+```
+
+ROUTING GUIDELINES:
+- "stop": No web presence AND no AI signals → mark as "insufficient information"
+- "2A": Low presence OR no AI signals → quick Sonar Base check
+- "2B": Good presence AND AI signals found → deeper Sonar Pro investigation
+
+Score guidelines:
+- 0-20: Virtually no online presence (dead website, no search results)
+- 21-40: Minimal presence (few search results, basic info only)
+- 41-60: Moderate presence (active website, some news/mentions)
+- 61-80: Good presence (multiple sources, recent activity)
+- 81-100: Strong presence (well-documented company, many sources)"""
+
+    return prompt
+
+
+async def classify_company(
+    company_name: str,
+    company_description: Optional[str],
+    website_status: WebsiteStatus,
+    search_result: TavilySearchResult,
+    api_key: Optional[str] = None
+) -> PresenceAssessment:
+    """
+    Use GPT-4o-mini to classify a company's online presence and AI signals.
+    
+    This is the "brain" of Stage 1 - it interprets the raw data and makes
+    the routing decision for subsequent stages.
+    
+    Args:
+        company_name: Name of the company.
+        company_description: Crunchbase description (if available).
+        website_status: Result from check_website().
+        search_result: Result from search_tavily().
+        api_key: OpenAI API key. Uses env var if not provided.
+    
+    Returns:
+        PresenceAssessment with scores, signals, and routing decision.
+    """
+    import os
+    import json
+    
+    api_key = api_key or os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return PresenceAssessment(
+            company_name=company_name,
+            online_presence_score=0,
+            presence_reasoning="",
+            ai_mentions_found=False,
+            ai_signals=[],
+            recommended_stage="stop",
+            routing_reasoning="",
+            error="OPENAI_API_KEY not set"
+        )
+    
+    user_prompt = _build_classifier_prompt(
+        company_name, company_description, website_status, search_result
+    )
+    
+    async with httpx.AsyncClient(timeout=PROCESSING.api_timeout) as client:
+        try:
+            response = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                        {"role": "system", "content": CLASSIFIER_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "temperature": 0.1,  # Low temperature for consistent classification
+                    "max_tokens": 500,
+                    "response_format": {"type": "json_object"},
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            # Parse the response
+            content = data["choices"][0]["message"]["content"]
+            result = json.loads(content)
+            
+            return PresenceAssessment(
+                company_name=company_name,
+                online_presence_score=int(result.get("online_presence_score", 0)),
+                presence_reasoning=result.get("presence_reasoning", ""),
+                ai_mentions_found=bool(result.get("ai_mentions_found", False)),
+                ai_signals=result.get("ai_signals", []),
+                recommended_stage=result.get("recommended_stage", "2A"),
+                routing_reasoning=result.get("routing_reasoning", ""),
+            )
+            
+        except httpx.HTTPStatusError as e:
+            return PresenceAssessment(
+                company_name=company_name,
+                online_presence_score=0,
+                presence_reasoning="",
+                ai_mentions_found=False,
+                ai_signals=[],
+                recommended_stage="stop",
+                routing_reasoning="",
+                error=f"HTTP {e.response.status_code}: {e.response.text[:100]}"
+            )
+        except json.JSONDecodeError as e:
+            return PresenceAssessment(
+                company_name=company_name,
+                online_presence_score=0,
+                presence_reasoning="",
+                ai_mentions_found=False,
+                ai_signals=[],
+                recommended_stage="stop",
+                routing_reasoning="",
+                error=f"Failed to parse GPT response: {str(e)}"
+            )
+        except Exception as e:
+            return PresenceAssessment(
+                company_name=company_name,
+                online_presence_score=0,
+                presence_reasoning="",
+                ai_mentions_found=False,
+                ai_signals=[],
+                recommended_stage="stop",
+                routing_reasoning="",
+                error=f"{type(e).__name__}: {str(e)[:100]}"
+            )
+
+
+def classify_company_sync(
+    company_name: str,
+    company_description: Optional[str],
+    website_status: WebsiteStatus,
+    search_result: TavilySearchResult,
+    api_key: Optional[str] = None
+) -> PresenceAssessment:
+    """Synchronous wrapper for classify_company."""
+    return asyncio.run(classify_company(
+        company_name, company_description, website_status, search_result, api_key
+    ))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPLETE STAGE 1 PIPELINE
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class Stage1Result:
+    """
+    Complete result from Stage 1 presence filter.
+    
+    Combines website check, search, and classification into one result.
+    """
+    company_name: str
+    company_id: int
+    
+    # Component results
+    website_status: WebsiteStatus
+    search_result: TavilySearchResult
+    assessment: PresenceAssessment
+    
+    # Summary for easy access
+    presence_score: int
+    ai_mentions_found: bool
+    next_stage: str
+    
+    # Cost tracking
+    estimated_cost: float = 0.011  # $0.01 Tavily + $0.001 GPT-4o-mini
+    
+    @property
+    def should_continue(self) -> bool:
+        """Should this company proceed to Stage 2?"""
+        return self.next_stage in ("2A", "2B", "3")
+
+
+async def run_stage_1(
+    company_id: int,
+    company_name: str,
+    homepage_url: Optional[str],
+    company_description: Optional[str],
+    tavily_api_key: Optional[str] = None,
+    openai_api_key: Optional[str] = None
+) -> Stage1Result:
+    """
+    Run the complete Stage 1 presence filter for a single company.
+    
+    This orchestrates:
+    1. Website health check
+    2. Tavily search for AI mentions
+    3. GPT-4o-mini classification and routing
+    
+    Args:
+        company_id: Unique identifier (rcid from Crunchbase).
+        company_name: Company name.
+        homepage_url: Company website URL.
+        company_description: Crunchbase description.
+        tavily_api_key: Tavily API key.
+        openai_api_key: OpenAI API key.
+    
+    Returns:
+        Stage1Result with all component results and routing decision.
+    """
+    # Step 1: Check website
+    website_status = await check_website(homepage_url or "")
+    
+    # Step 2: Search for AI mentions
+    search_result = await search_tavily(
+        company_name, 
+        homepage_url,
+        api_key=tavily_api_key
+    )
+    
+    # Step 3: Classify and route
+    assessment = await classify_company(
+        company_name,
+        company_description,
+        website_status,
+        search_result,
+        api_key=openai_api_key
+    )
+    
+    return Stage1Result(
+        company_name=company_name,
+        company_id=company_id,
+        website_status=website_status,
+        search_result=search_result,
+        assessment=assessment,
+        presence_score=assessment.online_presence_score,
+        ai_mentions_found=assessment.ai_mentions_found,
+        next_stage=assessment.recommended_stage,
+    )
+
+
+def run_stage_1_sync(
+    company_id: int,
+    company_name: str,
+    homepage_url: Optional[str],
+    company_description: Optional[str],
+    tavily_api_key: Optional[str] = None,
+    openai_api_key: Optional[str] = None
+) -> Stage1Result:
+    """Synchronous wrapper for run_stage_1."""
+    return asyncio.run(run_stage_1(
+        company_id, company_name, homepage_url, company_description,
+        tavily_api_key, openai_api_key
+    ))
