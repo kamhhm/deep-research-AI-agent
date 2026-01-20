@@ -1,0 +1,13 @@
+Research whether {company_name} uses any generative AI tools internally for their business operations.{context_section}
+
+Look for evidence of them USING AI tools like:
+- ChatGPT, Claude, or other LLMs for customer support, content creation, or operations
+- GitHub Copilot or AI coding assistants for software development
+- AI-powered tools for marketing, sales, HR, or other business functions
+
+Important: We want evidence of them USING AI tools, not whether they BUILD or SELL AI products.
+
+If you find evidence, describe specifically what tools they use and how.
+If you find no evidence, say so clearly.
+
+Be concise - this is a quick check.

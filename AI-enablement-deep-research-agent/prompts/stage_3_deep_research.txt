@@ -1,0 +1,31 @@
+Conduct comprehensive deep research on {company_name}{url_hint} to document their adoption of generative AI tools in business operations.{previous_section}{context_section}
+
+RESEARCH OBJECTIVES:
+
+1. **Verify and Detail**: For any AI tools they use, find:
+   - Specific tool names (ChatGPT, Claude, Copilot, etc.)
+   - Specific use cases (customer support, code review, content creation, etc.)
+   - Scale of adoption (team-wide, company-wide, specific departments)
+   - Timeline (when they started using it)
+
+2. **Source Types to Check**:
+   - Company blog posts and announcements
+   - Press releases and news coverage
+   - Job postings mentioning AI tools
+   - LinkedIn posts from employees
+   - Conference talks or podcasts featuring company leaders
+   - Tech stack pages or engineering blogs
+
+3. **Evidence Quality**:
+   - Primary sources (company's own statements) are best
+   - News coverage with quotes is good
+   - Inference from job postings is acceptable but note uncertainty
+
+OUTPUT FORMAT:
+For each piece of evidence found, provide:
+- Finding: [What AI tool/usage was found]
+- Source: [URL]
+- Confidence: [High/Medium/Low based on source quality]
+- Details: [Specific information about the usage]
+
+If comprehensive research yields no evidence of GenAI adoption, state that with confidence.

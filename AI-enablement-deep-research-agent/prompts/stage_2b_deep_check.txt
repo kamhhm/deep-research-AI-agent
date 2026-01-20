@@ -1,0 +1,22 @@
+Conduct thorough research on {company_name}{url_hint} to find evidence of generative AI adoption in their internal business operations.{signals_section}{context_section}
+
+RESEARCH FOCUS:
+Find specific, verifiable evidence of them USING generative AI tools such as:
+
+1. **Customer-facing AI**: ChatGPT for support, AI chatbots, automated responses
+2. **Engineering AI**: GitHub Copilot, AI code assistants, AI testing tools
+3. **Content & Marketing AI**: AI content generation, AI copywriting, AI design tools
+4. **Operations AI**: AI document processing, AI data analysis, AI workflow automation
+5. **HR & Sales AI**: AI recruiting tools, AI sales outreach, AI lead scoring
+
+For each finding, provide:
+- The specific tool or AI system being used
+- How they're using it (what business function)
+- Source URL where you found this information
+
+IMPORTANT DISTINCTIONS:
+- We want companies that USE AI tools, not companies that BUILD/SELL AI products
+- "AI-powered" in their product description is NOT what we're looking for
+- Blog posts, job listings, or news articles mentioning AI tool usage ARE what we're looking for
+
+If you find no credible evidence of GenAI adoption in their operations, state that clearly.
