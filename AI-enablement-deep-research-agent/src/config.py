@@ -58,20 +58,32 @@ class CostEstimates:
     """
     Per-query cost estimates for budget tracking.
     Values in USD.
+    
+    Note: These are conservative estimates. Actual costs depend on:
+    - API pricing tier (volume discounts available)
+    - Token usage (varies by company description length)
+    - Search result complexity
+    
+    Last updated: January 2026
     """
     # Stage 1: Tavily search + GPT-4o-mini interpretation
-    tavily_search: float = 0.001
-    gpt4o_mini_call: float = 0.001
-    stage_1_total: float = 0.002
+    # Tavily: ~$0.01/search on Researcher plan, less on Scale
+    # GPT-4o-mini: ~$0.15/1M input tokens, ~$0.60/1M output tokens
+    tavily_search: float = 0.01       # Conservative estimate
+    gpt4o_mini_call: float = 0.001    # ~500 tokens in, 200 out
+    stage_1_total: float = 0.011      # Tavily dominates the cost
 
-    # Stage 2A: Perplexity Sonar Base
+    # Stage 2A: Perplexity Sonar Base (llama-3.1-sonar-small)
+    # $0.20/1M input, $0.20/1M output + $5/1000 searches
     sonar_base: float = 0.02
 
-    # Stage 2B: Perplexity Sonar Pro
+    # Stage 2B: Perplexity Sonar Pro (llama-3.1-sonar-large)  
+    # $1/1M input, $1/1M output + $5/1000 searches
     sonar_pro_min: float = 0.05
     sonar_pro_max: float = 0.10
 
     # Stage 3: Perplexity Deep Research
+    # Significantly more expensive - multiple searches + reasoning
     deep_research_min: float = 0.41
     deep_research_max: float = 1.19
 
