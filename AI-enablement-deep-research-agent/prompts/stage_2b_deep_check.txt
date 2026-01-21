@@ -3,20 +3,30 @@ Conduct thorough research on {company_name}{url_hint} to find evidence of genera
 RESEARCH FOCUS:
 Find specific, verifiable evidence of them USING generative AI tools such as:
 
-1. **Customer-facing AI**: ChatGPT for support, AI chatbots, automated responses
-2. **Engineering AI**: GitHub Copilot, AI code assistants, AI testing tools
-3. **Content & Marketing AI**: AI content generation, AI copywriting, AI design tools
-4. **Operations AI**: AI document processing, AI data analysis, AI workflow automation
-5. **HR & Sales AI**: AI recruiting tools, AI sales outreach, AI lead scoring
-
-For each finding, provide:
-- The specific tool or AI system being used
-- How they're using it (what business function)
-- Source URL where you found this information
+1. Customer-facing AI: ChatGPT for support, AI chatbots, automated responses
+2. Engineering AI: GitHub Copilot, AI code assistants, AI testing tools
+3. Content & Marketing AI: AI content generation, AI copywriting, AI design tools
+4. Operations AI: AI document processing, AI data analysis, AI workflow automation
+5. HR & Sales AI: AI recruiting tools, AI sales outreach, AI lead scoring
 
 IMPORTANT DISTINCTIONS:
 - We want companies that USE AI tools, not companies that BUILD/SELL AI products
 - "AI-powered" in their product description is NOT what we're looking for
 - Blog posts, job listings, or news articles mentioning AI tool usage ARE what we're looking for
 
-If you find no credible evidence of GenAI adoption in their operations, state that clearly.
+OUTPUT FORMAT (respond with valid JSON only):
+{{
+  "genai_adoption_found": true or false,
+  "findings": [
+    {{
+      "tool_name": "ChatGPT" | "Claude" | "Copilot" | "Gemini" | "Midjourney" | "DALL-E" | "Other" | null,
+      "use_case": "customer_support" | "code_generation" | "content_creation" | "data_analysis" | "workflow_automation" | "recruiting" | "sales_outreach" | "other",
+      "business_function": "Engineering" | "Marketing" | "HR" | "Sales" | "Operations" | "Customer Service" | "General",
+      "evidence_summary": "Brief description of how they use the tool",
+      "source_url": "https://...",
+      "source_type": "company_blog" | "news" | "job_posting" | "linkedin" | "press_release" | "other",
+      "confidence": 0.0 to 1.0
+    }}
+  ],
+  "no_finding_reason": "insufficient_information" | "no_evidence" | null
+}}
