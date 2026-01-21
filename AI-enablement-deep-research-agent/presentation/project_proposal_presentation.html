@@ -1,0 +1,1142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GenAI Adoption Research | UBC Sauder</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #faf9f7;
+            --bg-secondary: #ffffff;
+            --bg-accent: #f5f3f0;
+            --bg-code: #1e1e1e;
+            --text-primary: #1a1a1a;
+            --text-secondary: #4a4a4a;
+            --text-muted: #8a8a8a;
+            --border: #e5e3df;
+            --stage-1: #3b82f6;
+            --stage-2a: #22c55e;
+            --stage-2b: #f59e0b;
+            --stage-3: #ef4444;
+            --font-serif: 'Cormorant Garamond', Georgia, serif;
+            --font-sans: 'Inter', -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.7;
+            font-size: 16px;
+        }
+        ::selection { background: #c9a959; color: white; }
+
+        /* Navigation */
+        nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100vh;
+            width: 220px;
+            padding: 3rem 2rem;
+            background: var(--bg-primary);
+            border-right: 1px solid var(--border);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+        .nav-brand {
+            font-family: var(--font-serif);
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 3rem;
+        }
+        .nav-section { margin-bottom: 2rem; }
+        .nav-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-muted);
+            margin-bottom: 0.75rem;
+        }
+        .nav-links { list-style: none; }
+        .nav-links li { margin-bottom: 0.5rem; }
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: color 0.2s;
+        }
+        .nav-links a:hover { color: var(--text-primary); }
+
+        /* Main Content */
+        main { margin-left: 220px; min-height: 100vh; }
+        section {
+            padding: 5rem 4rem;
+            max-width: 1000px;
+            margin: 0 auto;
+            border-bottom: 1px solid var(--border);
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 0.8s ease, transform 0.8s ease;
+        }
+        section:last-of-type { border-bottom: none; }
+        section.visible { opacity: 1; transform: translateY(0); }
+
+        /* Typography */
+        h1 {
+            font-family: var(--font-serif);
+            font-size: clamp(2.5rem, 5vw, 3.5rem);
+            font-weight: 400;
+            letter-spacing: -0.02em;
+            line-height: 1.2;
+            margin-bottom: 1.5rem;
+        }
+        h2 {
+            font-family: var(--font-serif);
+            font-size: clamp(1.8rem, 3vw, 2.2rem);
+            font-weight: 400;
+            margin-bottom: 1.5rem;
+        }
+        h3 {
+            font-family: var(--font-serif);
+            font-size: 1.3rem;
+            font-weight: 500;
+            margin-bottom: 0.75rem;
+        }
+        h4 {
+            font-family: var(--font-sans);
+            font-size: 0.85rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.75rem;
+            color: var(--text-muted);
+        }
+        p {
+            color: var(--text-secondary);
+            font-size: 1rem;
+            max-width: 700px;
+            margin-bottom: 1.5rem;
+        }
+        .label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            display: block;
+        }
+        .large-text {
+            font-family: var(--font-serif);
+            font-size: 1.25rem;
+            line-height: 1.8;
+            color: var(--text-secondary);
+        }
+
+        /* Hero */
+        #hero {
+            min-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .hero-stats {
+            display: flex;
+            gap: 4rem;
+            margin-top: 4rem;
+            padding-top: 3rem;
+            border-top: 1px solid var(--border);
+        }
+        .stat-value {
+            font-family: var(--font-serif);
+            font-size: 2.5rem;
+            font-weight: 400;
+            line-height: 1;
+            margin-bottom: 0.5rem;
+        }
+        .stat-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-muted);
+        }
+
+        /* Flowchart - Clean with Big Arrows */
+        .flowchart {
+            margin: 3rem 0;
+            padding: 3rem 2rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+        }
+        .flowchart-title {
+            font-family: var(--font-serif);
+            font-size: 1.1rem;
+            margin-bottom: 2.5rem;
+            text-align: center;
+            color: var(--text-muted);
+        }
+        .flow-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        /* Nodes */
+        .flow-node {
+            padding: 1.25rem 2.5rem;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 1rem;
+            font-weight: 600;
+            min-width: 280px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .flow-node .subtitle {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: 400;
+            opacity: 0.8;
+            margin-top: 0.25rem;
+            font-family: var(--font-mono);
+        }
+        .flow-node.input { background: #f8fafc; border: 2px solid #94a3b8; color: #475569; }
+        .flow-node.stage-1 { background: #dbeafe; border: 3px solid var(--stage-1); color: #1e40af; }
+        .flow-node.stage-2a { background: #dcfce7; border: 3px solid var(--stage-2a); color: #166534; }
+        .flow-node.stage-2b { background: #fef3c7; border: 3px solid var(--stage-2b); color: #92400e; }
+        .flow-node.stage-3 { background: #fee2e2; border: 3px solid var(--stage-3); color: #991b1b; }
+        .flow-node.output { background: #1e293b; border: 3px solid #1e293b; color: #f8fafc; }
+        .flow-node.decision { 
+            background: linear-gradient(135deg, #faf5ff 0%, #f0f9ff 100%); 
+            border: 2px dashed #a855f7; 
+            color: #7c3aed;
+            min-width: 320px;
+        }
+        .flow-node.stop { background: #fef2f2; border: 2px solid #fca5a5; color: #991b1b; min-width: 140px; padding: 0.75rem 1.5rem; }
+        /* Big Arrows with Labels */
+        .flow-arrow {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 0.75rem 0;
+        }
+        .flow-arrow .shaft {
+            width: 4px;
+            height: 50px;
+            background: linear-gradient(180deg, #94a3b8 0%, #475569 100%);
+            border-radius: 2px;
+        }
+        .flow-arrow .head {
+            width: 0;
+            height: 0;
+            border-left: 12px solid transparent;
+            border-right: 12px solid transparent;
+            border-top: 16px solid #475569;
+        }
+        .flow-arrow .label {
+            margin-top: 0.5rem;
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            color: #64748b;
+            background: #f1f5f9;
+            padding: 0.3rem 0.75rem;
+            border-radius: 4px;
+            border: 1px solid #e2e8f0;
+        }
+        /* Branching */
+        .flow-branch { 
+            display: flex; 
+            justify-content: center;
+            gap: 2rem; 
+            padding: 1rem 0;
+            position: relative;
+        }
+        .flow-branch::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 70%;
+            height: 3px;
+            background: #475569;
+        }
+        .flow-branch-item { 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center;
+            position: relative;
+        }
+        .flow-branch-item::before {
+            content: '';
+            width: 3px;
+            height: 20px;
+            background: #475569;
+        }
+        .flow-branch-item .flow-arrow-small {
+            width: 0;
+            height: 0;
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            border-top: 10px solid #475569;
+            margin-bottom: 0.5rem;
+        }
+        .flow-condition { 
+            font-size: 0.7rem; 
+            color: #64748b; 
+            margin-bottom: 0.5rem; 
+            font-style: italic;
+            text-align: center;
+            max-width: 160px;
+            line-height: 1.3;
+        }
+        .flow-percent { 
+            font-size: 0.7rem; 
+            color: var(--text-muted); 
+            margin-top: 0.35rem;
+            font-family: var(--font-mono);
+        }
+        /* Merge point */
+        .flow-merge {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            padding: 1rem 0;
+            position: relative;
+        }
+        .flow-merge::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 70%;
+            height: 3px;
+            background: #475569;
+        }
+        .flow-merge-arm {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .flow-merge-arm .shaft {
+            width: 3px;
+            height: 30px;
+            background: #475569;
+        }
+
+        /* Stage Details */
+        .stage-detail {
+            margin: 3rem 0;
+            padding: 2rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-left: 4px solid;
+        }
+        .stage-detail.s1 { border-left-color: var(--stage-1); }
+        .stage-detail.s2a { border-left-color: var(--stage-2a); }
+        .stage-detail.s2b { border-left-color: var(--stage-2b); }
+        .stage-detail.s3 { border-left-color: var(--stage-3); }
+        .stage-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1.5rem;
+        }
+        .stage-badge {
+            font-size: 0.7rem;
+            font-weight: 500;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .stage-badge.s1 { background: #dbeafe; color: #1e40af; }
+        .stage-badge.s2a { background: #dcfce7; color: #166534; }
+        .stage-badge.s2b { background: #fef3c7; color: #92400e; }
+        .stage-badge.s3 { background: #fee2e2; color: #991b1b; }
+
+        /* Code Blocks */
+        .code-block {
+            background: var(--bg-code);
+            border-radius: 8px;
+            margin: 1.5rem 0;
+            overflow: hidden;
+        }
+        .code-header {
+            padding: 0.75rem 1rem;
+            background: #2d2d2d;
+            border-bottom: 1px solid #3d3d3d;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: #888;
+            display: flex;
+            justify-content: space-between;
+        }
+        pre {
+            padding: 1.25rem;
+            overflow-x: auto;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            line-height: 1.6;
+            color: #d4d4d4;
+            margin: 0;
+        }
+        .code-comment { color: #6a9955; }
+        .code-keyword { color: #569cd6; }
+        .code-string { color: #ce9178; }
+        .code-function { color: #dcdcaa; }
+        .code-number { color: #b5cea8; }
+        .code-type { color: #4ec9b0; }
+
+        /* Tradeoff & Question Boxes */
+        .tradeoff-box {
+            margin: 2rem 0;
+            padding: 1.5rem;
+            background: #fffbeb;
+            border: 1px solid #fbbf24;
+            border-radius: 8px;
+        }
+        .tradeoff-box h4 { color: #92400e; margin-bottom: 1rem; }
+        .tradeoff-box h4::before { content: '⚖️ '; }
+        .tradeoff-box p { margin-bottom: 0.75rem; font-size: 0.95rem; }
+        .tradeoff-box p:last-child { margin-bottom: 0; }
+
+        .question-box {
+            margin: 2rem 0;
+            padding: 1.5rem;
+            background: #f0f9ff;
+            border: 1px solid #3b82f6;
+            border-radius: 8px;
+        }
+        .question-box h4 { color: #1e40af; margin-bottom: 1rem; }
+        .question-box h4::before { content: '💬 '; }
+        .question-box ul { margin-left: 1.5rem; color: var(--text-secondary); font-size: 0.95rem; }
+        .question-box li { margin-bottom: 0.5rem; }
+
+        .review-box {
+            margin: 2rem 0;
+            padding: 1.5rem;
+            background: #fdf4ff;
+            border: 1px solid #c026d3;
+            border-radius: 8px;
+        }
+        .review-box h4 { color: #86198f; margin-bottom: 1rem; }
+        .review-box h4::before { content: '👀 '; }
+        .review-box p { font-size: 0.95rem; margin-bottom: 0.75rem; }
+
+        /* Prompt Display */
+        .prompt-display {
+            background: var(--bg-accent);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin: 1.5rem 0;
+            overflow: hidden;
+        }
+        .prompt-header {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.8rem;
+            font-weight: 500;
+            background: var(--bg-secondary);
+        }
+        .prompt-content {
+            padding: 1.25rem;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            color: var(--text-secondary);
+        }
+
+        /* Data Table */
+        .data-table {
+            margin-top: 2rem;
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+        .data-table th, .data-table td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        .data-table th {
+            font-weight: 500;
+            color: var(--text-muted);
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            background: var(--bg-accent);
+        }
+        .badge {
+            display: inline-block;
+            padding: 0.15rem 0.5rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+            border-radius: 3px;
+        }
+        .badge-yes { background: #dcfce7; color: #166534; }
+        .badge-no { background: #fee2e2; color: #991b1b; }
+
+        /* Progress Grid */
+        .progress-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+        .progress-category h4 {
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 1rem;
+        }
+        .progress-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.75rem;
+        }
+        .progress-icon {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            margin-top: 6px;
+        }
+        .progress-icon.done { background: #22c55e; }
+        .progress-icon.pending { background: #d4d4d4; }
+        .progress-icon.blocked { background: #f59e0b; }
+
+        /* Footer */
+        footer {
+            padding: 4rem;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+        footer p { max-width: none; margin: 0 auto 0.5rem; }
+
+        /* Responsive */
+        @media (max-width: 1100px) {
+            nav { display: none; }
+            main { margin-left: 0; }
+            section { padding: 3rem 2rem; }
+            .hero-stats { flex-wrap: wrap; gap: 2rem; }
+            .progress-grid { grid-template-columns: 1fr; }
+            .flow-branch { flex-direction: column; gap: 1rem; }
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="nav-brand">UBC Sauder</div>
+        <div class="nav-section">
+            <div class="nav-label">Sections</div>
+            <ul class="nav-links">
+                <li><a href="#hero">Overview</a></li>
+                <li><a href="#architecture">Architecture</a></li>
+                <li><a href="#finding-types">Finding Types</a></li>
+                <li><a href="#stage1">Stage 1: Routing</a></li>
+                <li><a href="#prompts">Perplexity Prompts</a></li>
+                <li><a href="#output">Output Schema</a></li>
+                <li><a href="#progress">Progress</a></li>
+            </ul>
+        </div>
+        <div class="nav-section" style="margin-top: auto;">
+            <div class="nav-label">Advisor</div>
+            <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">Prof. Jan Bena</p>
+        </div>
+    </nav>
+
+    <main>
+        <!-- HERO -->
+        <section id="hero">
+            <span class="label">Research Project Proposal</span>
+            <h1>Deep Research Agent for<br>GenAI Adoption Discovery</h1>
+            <p class="large-text">
+                Building a cost-optimized, multi-stage pipeline to systematically find evidence of generative AI tool adoption across 44,387 US startups from Crunchbase.
+            </p>
+            <div class="hero-stats">
+                <div class="stat">
+                    <div class="stat-value">44,387</div>
+                    <div class="stat-label">Companies</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">&lt;$0.10</div>
+                    <div class="stat-label">Target Cost/Co</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">3-Stage</div>
+                    <div class="stat-label">Pipeline</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">~$4,400</div>
+                    <div class="stat-label">Total Budget</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ARCHITECTURE -->
+        <section id="architecture">
+            <span class="label">System Design</span>
+            <h2>Pipeline Architecture</h2>
+            <p>
+                The core insight: not all companies require the same research depth. We use a <strong>tiered escalation model</strong> that spends more on companies where evidence is likely, and less on dead ends.
+            </p>
+
+            <div class="flowchart">
+                <div class="flowchart-title">Pipeline Data Flow</div>
+                <div class="flow-container">
+                    
+                    <!-- INPUT -->
+                    <div class="flow-node input">
+                        INPUT: 44,387 Companies
+                        <span class="subtitle">Crunchbase CSV</span>
+                    </div>
+                    
+                    <!-- Arrow: Input → Stage 1 -->
+                    <div class="flow-arrow">
+                        <div class="shaft"></div>
+                        <div class="head"></div>
+                        <div class="label">Company object (Pydantic)</div>
+                    </div>
+                    
+                    <!-- STAGE 1 -->
+                    <div class="flow-node stage-1">
+                        Stage 1: Presence Filter
+                        <span class="subtitle">$0.011/co · 100% · httpx + Tavily + GPT-4o-mini</span>
+                    </div>
+                    
+                    <!-- Arrow: Stage 1 → Routing -->
+                    <div class="flow-arrow">
+                        <div class="shaft"></div>
+                        <div class="head"></div>
+                        <div class="label">Stage1Result + routing decision</div>
+                    </div>
+                    
+                    <!-- ROUTING DECISION -->
+                    <div class="flow-node decision">
+                        🔀 Routing Decision (GPT-4o-mini)
+                    </div>
+                    
+                    <!-- BRANCH: 3 paths -->
+                    <div class="flow-branch">
+                        <div class="flow-branch-item">
+                            <div class="flow-arrow-small"></div>
+                            <div class="flow-condition">No presence<br>AND no signals</div>
+                            <div class="flow-node stop">STOP<span class="subtitle">~5%</span></div>
+                        </div>
+                        <div class="flow-branch-item">
+                            <div class="flow-arrow-small"></div>
+                            <div class="flow-condition">Low presence OR<br>no AI signals</div>
+                            <div class="flow-node stage-2a">Stage 2A<span class="subtitle">$0.02 · ~40%</span></div>
+                        </div>
+                        <div class="flow-branch-item">
+                            <div class="flow-arrow-small"></div>
+                            <div class="flow-condition">Good presence AND<br>AI signals found</div>
+                            <div class="flow-node stage-2b">Stage 2B<span class="subtitle">$0.08 · ~55%</span></div>
+                        </div>
+                    </div>
+                    
+                    <!-- MERGE: Stage 2A & 2B converge -->
+                    <div class="flow-merge">
+                        <div class="flow-merge-arm"><div class="shaft"></div></div>
+                        <div class="flow-merge-arm"><div class="shaft"></div></div>
+                        <div class="flow-merge-arm"><div class="shaft"></div></div>
+                    </div>
+                    
+                    <!-- Arrow: Merge → Escalation -->
+                    <div class="flow-arrow">
+                        <div class="shaft"></div>
+                        <div class="head"></div>
+                        <div class="label">ResearchResult (JSON) + citations</div>
+                    </div>
+                    
+                    <!-- ESCALATION DECISION -->
+                    <div class="flow-node decision">
+                        🔀 Escalation Decision
+                        <span class="subtitle">~5% ambiguous → Stage 3 | ~95% → Write CSV</span>
+                    </div>
+                    
+                    <!-- Arrow: Escalation → Stage 3 -->
+                    <div class="flow-arrow">
+                        <div class="shaft"></div>
+                        <div class="head"></div>
+                        <div class="label">High-value ambiguous cases only</div>
+                    </div>
+                    
+                    <!-- STAGE 3 -->
+                    <div class="flow-node stage-3">
+                        Stage 3: Deep Research
+                        <span class="subtitle">$0.40-1.20/co · ~5% · Perplexity reasoning-pro</span>
+                    </div>
+                    
+                    <!-- Arrow: Stage 3 → Output -->
+                    <div class="flow-arrow">
+                        <div class="shaft"></div>
+                        <div class="head"></div>
+                        <div class="label">Structured JSON findings</div>
+                    </div>
+                    
+                    <!-- OUTPUT -->
+                    <div class="flow-node output">
+                        OUTPUT: EDA-Ready CSV
+                        <span class="subtitle">1 row/finding · 20 columns · All companies</span>
+                    </div>
+                    
+                </div>
+            </div>
+
+            <div class="tradeoff-box">
+                <h4>Design Tradeoff: Breadth vs. Depth</h4>
+                <p><strong>Alternative considered:</strong> Run Deep Research (Stage 3) on every company for maximum accuracy.</p>
+                <p><strong>Problem:</strong> At $0.80/company × 44,387 companies = <strong>$35,500</strong> — 8× over budget.</p>
+                <p><strong>Our approach:</strong> Use cheap signals to route companies intelligently. Only 5% reach Stage 3, keeping average cost at ~$0.10.</p>
+            </div>
+        </section>
+
+        <!-- FINDING TYPES -->
+        <section id="finding-types">
+            <span class="label">Data Classification</span>
+            <h2>Finding Types (Enum)</h2>
+            <p>
+                Every finding is categorized into one of these types. This classification enables aggregation and analysis in the final dataset.
+            </p>
+
+            <div class="review-box">
+                <h4>Review Required: Are these categories complete?</h4>
+                <p>Should we add/remove/modify any categories? These will be used to classify all findings in the final dataset.</p>
+            </div>
+
+            <div class="code-block">
+                <div class="code-header">
+                    <span>models.py</span>
+                    <span>FindingType enum</span>
+                </div>
+                <pre><span class="code-keyword">class</span> <span class="code-type">FindingType</span>(<span class="code-type">str</span>, <span class="code-type">Enum</span>):
+    <span class="code-string">"""Categories of GenAI adoption evidence."""</span>
+    
+    <span class="code-comment"># Customer-facing</span>
+    CHATGPT_CUSTOMER_SUPPORT = <span class="code-string">"chatgpt_customer_support"</span>
+    AI_CHATBOT_GENERAL = <span class="code-string">"ai_chatbot_general"</span>
+
+    <span class="code-comment"># Engineering & Development</span>
+    COPILOT_ENGINEERING = <span class="code-string">"copilot_engineering"</span>
+    AI_CODE_GENERATION = <span class="code-string">"ai_code_generation"</span>
+    AI_TESTING_QA = <span class="code-string">"ai_testing_qa"</span>
+
+    <span class="code-comment"># Marketing & Content</span>
+    AI_CONTENT_GENERATION = <span class="code-string">"ai_content_generation"</span>
+    AI_MARKETING_AUTOMATION = <span class="code-string">"ai_marketing_automation"</span>
+    AI_COPYWRITING = <span class="code-string">"ai_copywriting"</span>
+
+    <span class="code-comment"># Operations</span>
+    AI_DOCUMENT_PROCESSING = <span class="code-string">"ai_document_processing"</span>
+    AI_DATA_ANALYSIS = <span class="code-string">"ai_data_analysis"</span>
+    AI_WORKFLOW_AUTOMATION = <span class="code-string">"ai_workflow_automation"</span>
+
+    <span class="code-comment"># HR & Recruiting</span>
+    AI_RECRUITING_SCREENING = <span class="code-string">"ai_recruiting_screening"</span>
+    AI_HR_OPERATIONS = <span class="code-string">"ai_hr_operations"</span>
+
+    <span class="code-comment"># Sales</span>
+    AI_SALES_OUTREACH = <span class="code-string">"ai_sales_outreach"</span>
+    AI_LEAD_SCORING = <span class="code-string">"ai_lead_scoring"</span>
+
+    <span class="code-comment"># Other / Negative</span>
+    AI_INTERNAL_TOOLS_GENERAL = <span class="code-string">"ai_internal_tools_general"</span>
+    AI_ADOPTION_UNSPECIFIED = <span class="code-string">"ai_adoption_unspecified"</span>
+    NO_ADOPTION_FOUND = <span class="code-string">"no_adoption_found"</span>
+    INSUFFICIENT_INFORMATION = <span class="code-string">"insufficient_information"</span></pre>
+            </div>
+
+            <div class="question-box">
+                <h4>Questions for Discussion</h4>
+                <ul>
+                    <li>Should we separate "ChatGPT" from "Claude" as distinct types?</li>
+                    <li>Are there use cases we're missing (e.g., AI for legal, finance)?</li>
+                    <li>Is the granularity right, or should categories be broader/narrower?</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- STAGE 1: ROUTING LOGIC -->
+        <section id="stage1">
+            <span class="label">Technical Deep-Dive</span>
+            <h2>Stage 1: GPT-4o-mini Routing</h2>
+            <p>
+                The "brain" of Stage 1: GPT-4o-mini interprets search results and decides which stage each company should proceed to.
+            </p>
+
+            <div class="stage-detail s1">
+                <div class="stage-header">
+                    <h3>System Prompt for Classifier</h3>
+                    <span class="stage-badge s1">GPT-4o-mini</span>
+                </div>
+                <p style="font-size: 0.9rem; margin-bottom: 1rem;">This prompt establishes the classification criteria and the key distinction we're making:</p>
+
+                <div class="code-block">
+                    <div class="code-header">
+                        <span>stage_1_filter.py</span>
+                        <span>CLASSIFIER_SYSTEM_PROMPT</span>
+                    </div>
+                    <pre>You are an AI research assistant helping identify evidence of 
+GenAI adoption in business operations.
+
+Your task: Analyze the provided information about a company and assess:
+1. Their online presence (how much information is available)
+2. Whether there are any signals they might be using GenAI tools internally
+
+<span class="code-comment">IMPORTANT DISTINCTIONS:</span>
+- We care about INTERNAL GenAI usage (using ChatGPT for customer support, 
+  Copilot for coding, AI for content generation)
+- We do NOT care about companies that BUILD AI products - 
+  we want companies that USE AI tools
+- A company selling "AI-powered analytics" is NOT what we're looking for
+- A company using "ChatGPT to respond to customer emails" IS what we're looking for</pre>
+                </div>
+            </div>
+
+            <div class="stage-detail s1">
+                <div class="stage-header">
+                    <h3>Routing Logic & Scoring Guidelines</h3>
+                    <span class="stage-badge s1">Decision Rules</span>
+                </div>
+                <p style="font-size: 0.9rem; margin-bottom: 1rem;">The user prompt includes explicit routing rules and score guidelines:</p>
+
+                <div class="code-block">
+                    <div class="code-header">
+                        <span>stage_1_filter.py</span>
+                        <span>Routing Guidelines in Prompt</span>
+                    </div>
+                    <pre><span class="code-comment">ROUTING GUIDELINES:</span>
+- <span class="code-string">"stop"</span>: No web presence AND no AI signals → mark as "insufficient information"
+- <span class="code-string">"2A"</span>:   Low presence OR no AI signals → quick Sonar Base check
+- <span class="code-string">"2B"</span>:   Good presence AND AI signals found → deeper Sonar Pro investigation
+
+<span class="code-comment">PRESENCE SCORE GUIDELINES:</span>
+-  0-20: Virtually no online presence (dead website, no search results)
+- 21-40: Minimal presence (few search results, basic info only)
+- 41-60: Moderate presence (active website, some news/mentions)
+- 61-80: Good presence (multiple sources, recent activity)
+- 81-100: Strong presence (well-documented company, many sources)
+
+<span class="code-comment">GPT-4o-mini outputs JSON:</span>
+{
+  "online_presence_score": <span class="code-number">0-100</span>,
+  "presence_reasoning": <span class="code-string">"&lt;brief explanation&gt;"</span>,
+  "ai_mentions_found": <span class="code-keyword">true/false</span>,
+  "ai_signals": [<span class="code-string">"specific signal 1"</span>, <span class="code-string">"signal 2"</span>],
+  "recommended_stage": <span class="code-string">"2A"</span> | <span class="code-string">"2B"</span> | <span class="code-string">"stop"</span>,
+  "routing_reasoning": <span class="code-string">"&lt;why this routing&gt;"</span>
+}</pre>
+                </div>
+            </div>
+
+            <div class="tradeoff-box">
+                <h4>Design Tradeoff: Threshold Values</h4>
+                <p><strong>Current thresholds:</strong> Low ≤40, High ≥60 (implicit boundary at 40-60 for "medium").</p>
+                <p><strong>Risk:</strong> Too aggressive → miss companies. Too conservative → waste budget.</p>
+                <p><strong>Plan:</strong> Run pilot on 100 companies, review GPT's reasoning, and tune thresholds based on actual distribution.</p>
+            </div>
+
+            <div class="question-box">
+                <h4>Questions for Discussion</h4>
+                <ul>
+                    <li>Are the 40/60/80 score thresholds reasonable starting points?</li>
+                    <li>Should we add a "3" routing option for Stage 1 (direct to Deep Research)?</li>
+                    <li>Is the "USE vs BUILD" distinction clear enough in the prompt?</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- PERPLEXITY PROMPTS -->
+        <section id="prompts">
+            <span class="label">Perplexity Sonar API</span>
+            <h2>Research Prompts</h2>
+            <p>
+                These prompts are sent to Perplexity's Sonar API at different stages. The API has real-time web access and returns findings with citations.
+            </p>
+
+            <div class="review-box">
+                <h4>Review Required: Are these prompts effective?</h4>
+                <p>The quality of findings depends entirely on these prompts. Should we add/change any instructions?</p>
+            </div>
+
+            <!-- Stage 2A Prompt -->
+            <div class="stage-detail s2a">
+                <div class="stage-header">
+                    <h3>Stage 2A: Quick Check (Sonar Small)</h3>
+                    <span class="stage-badge s2a">~40% of companies · $0.02</span>
+                </div>
+                <p style="font-size: 0.9rem; margin-bottom: 1rem;">Fast, cheap check for companies with low presence or no initial AI signals:</p>
+
+                <div class="prompt-display">
+                    <div class="prompt-header">prompts/stage_2a_quick_check.txt</div>
+                    <div class="prompt-content">Research whether {company_name} uses any generative AI tools 
+internally for their business operations.
+
+Look for evidence of them USING AI tools like:
+- ChatGPT, Claude, or other LLMs for customer support, content creation
+- GitHub Copilot or AI coding assistants for software development
+- AI-powered tools for marketing, sales, HR, or other business functions
+
+IMPORTANT: We want evidence of them USING AI tools, not whether 
+they BUILD or SELL AI products.
+
+Be concise - this is a quick check.</div>
+                </div>
+            </div>
+
+            <!-- Stage 2B Prompt -->
+            <div class="stage-detail s2b">
+                <div class="stage-header">
+                    <h3>Stage 2B: Deep Check (Sonar Large)</h3>
+                    <span class="stage-badge s2b">~55% of companies · $0.05-0.10</span>
+                </div>
+                <p style="font-size: 0.9rem; margin-bottom: 1rem;">Thorough investigation for promising companies with good presence and AI signals:</p>
+
+                <div class="prompt-display">
+                    <div class="prompt-header">prompts/stage_2b_deep_check.txt</div>
+                    <div class="prompt-content">Conduct thorough research on {company_name} to find evidence 
+of generative AI adoption in their internal business operations.
+
+RESEARCH FOCUS:
+Find specific, verifiable evidence of them USING generative AI tools:
+
+1. Customer-facing AI: ChatGPT for support, AI chatbots, automated responses
+2. Engineering AI: GitHub Copilot, AI code assistants, AI testing tools
+3. Content & Marketing AI: AI content generation, AI copywriting, AI design
+4. Operations AI: AI document processing, AI data analysis, AI automation
+5. HR & Sales AI: AI recruiting tools, AI sales outreach, AI lead scoring
+
+IMPORTANT DISTINCTIONS:
+- We want companies that USE AI tools, not companies that BUILD/SELL AI
+- "AI-powered" in their product description is NOT what we're looking for
+- Blog posts, job listings, or news mentioning AI tool usage ARE relevant</div>
+                </div>
+            </div>
+
+            <!-- Stage 3 Prompt -->
+            <div class="stage-detail s3">
+                <div class="stage-header">
+                    <h3>Stage 3: Deep Research (Sonar Huge)</h3>
+                    <span class="stage-badge s3">~5% of companies · $0.40-1.20</span>
+                </div>
+                <p style="font-size: 0.9rem; margin-bottom: 1rem;">Comprehensive investigation for high-value ambiguous cases:</p>
+
+                <div class="prompt-display">
+                    <div class="prompt-header">prompts/stage_3_deep_research.txt</div>
+                    <div class="prompt-content">Conduct comprehensive deep research on {company_name} to document 
+their adoption of generative AI tools in business operations.
+
+RESEARCH OBJECTIVES:
+
+1. Verify and Detail: For any AI tools they use, find:
+   - Specific tool names (ChatGPT, Claude, Copilot, etc.)
+   - Specific use cases (customer support, code review, content creation)
+   - Scale of adoption (team-wide, company-wide, specific departments)
+   - Timeline (when they started using it)
+
+2. Source Types to Check:
+   - Company blog posts and announcements
+   - Press releases and news coverage
+   - Job postings mentioning AI tools
+   - LinkedIn posts from employees
+   - Conference talks or podcasts featuring company leaders
+   - Tech stack pages or engineering blogs
+
+3. Evidence Quality:
+   - Primary sources (company's own statements) are best
+   - News coverage with quotes is good
+   - Inference from job postings is acceptable but note uncertainty</div>
+                </div>
+            </div>
+
+            <!-- JSON Output Schema -->
+            <h3 style="margin-top: 3rem;">Structured Output Schema (All Stages)</h3>
+            <p>All prompts require this JSON output format for consistent parsing:</p>
+
+            <div class="code-block">
+                <div class="code-header">
+                    <span>JSON Output Format</span>
+                    <span>Required by all Perplexity prompts</span>
+                </div>
+                <pre>{
+  <span class="code-string">"genai_adoption_found"</span>: <span class="code-keyword">true</span> | <span class="code-keyword">false</span>,
+  <span class="code-string">"findings"</span>: [
+    {
+      <span class="code-string">"tool_name"</span>: <span class="code-string">"ChatGPT"</span> | <span class="code-string">"Claude"</span> | <span class="code-string">"Copilot"</span> | <span class="code-string">"Gemini"</span> | <span class="code-string">"Other"</span>,
+      <span class="code-string">"use_case"</span>: <span class="code-string">"customer_support"</span> | <span class="code-string">"code_generation"</span> | <span class="code-string">"content_creation"</span> | ...,
+      <span class="code-string">"business_function"</span>: <span class="code-string">"Engineering"</span> | <span class="code-string">"Marketing"</span> | <span class="code-string">"HR"</span> | <span class="code-string">"Sales"</span> | ...,
+      <span class="code-string">"evidence_summary"</span>: <span class="code-string">"Brief description of how they use the tool"</span>,
+      <span class="code-string">"source_url"</span>: <span class="code-string">"https://..."</span>,
+      <span class="code-string">"source_type"</span>: <span class="code-string">"company_blog"</span> | <span class="code-string">"news"</span> | <span class="code-string">"job_posting"</span> | <span class="code-string">"linkedin"</span>,
+      <span class="code-string">"confidence"</span>: <span class="code-number">0.0</span> to <span class="code-number">1.0</span>
+    }
+  ],
+  <span class="code-string">"no_finding_reason"</span>: <span class="code-string">"insufficient_information"</span> | <span class="code-string">"no_evidence"</span> | <span class="code-keyword">null</span>
+}</pre>
+            </div>
+
+            <div class="question-box">
+                <h4>Questions for Discussion</h4>
+                <ul>
+                    <li>Should Stage 2A and 2B use different prompts, or is the same prompt with different models sufficient?</li>
+                    <li>Is the "USE vs BUILD" distinction emphasized enough across all prompts?</li>
+                    <li>Should we add specific instructions about source reliability (e.g., "prefer primary sources")?</li>
+                    <li>Are there other source types we should explicitly ask the model to check?</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- OUTPUT SCHEMA -->
+        <section id="output">
+            <span class="label">Data Structure</span>
+            <h2>Output Schema</h2>
+            <p>
+                The final CSV is <strong>EDA-ready</strong>—every company gets at least one row, with multiple rows for multiple findings.
+            </p>
+
+            <h3 style="margin-top: 2rem;">Sample CSV Output</h3>
+            <p>Row expansion: 4 companies → 5 rows (TechCorp has 2 findings)</p>
+
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Company</th>
+                        <th>Stage</th>
+                        <th>Found</th>
+                        <th>Tool</th>
+                        <th>Use Case</th>
+                        <th>Source</th>
+                        <th>Conf.</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>TechCorp Inc</td>
+                        <td>2B</td>
+                        <td><span class="badge badge-yes">Yes</span></td>
+                        <td>ChatGPT</td>
+                        <td>customer_support</td>
+                        <td>company_blog</td>
+                        <td>0.85</td>
+                    </tr>
+                    <tr>
+                        <td>TechCorp Inc</td>
+                        <td>2B</td>
+                        <td><span class="badge badge-yes">Yes</span></td>
+                        <td>Copilot</td>
+                        <td>code_generation</td>
+                        <td>linkedin</td>
+                        <td>0.70</td>
+                    </tr>
+                    <tr>
+                        <td>MarketingPro</td>
+                        <td>2A</td>
+                        <td><span class="badge badge-yes">Yes</span></td>
+                        <td>ChatGPT</td>
+                        <td>content_creation</td>
+                        <td>news</td>
+                        <td>0.60</td>
+                    </tr>
+                    <tr>
+                        <td>Traditional Corp</td>
+                        <td>2A</td>
+                        <td><span class="badge badge-no">No</span></td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>—</td>
+                    </tr>
+                    <tr>
+                        <td>Ghost Startup</td>
+                        <td>1</td>
+                        <td><span class="badge badge-no">No</span></td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>—</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div style="background: var(--bg-accent); padding: 1.5rem; border-radius: 8px; margin-top: 2rem;">
+                <h4>20 Columns Total</h4>
+                <p><strong>Company:</strong> company_id, company_name, homepage_url, industry, founded_year</p>
+                <p><strong>Research:</strong> research_stage_reached, online_presence_score, website_alive, research_cost_usd, researched_at</p>
+                <p style="margin-bottom: 0;"><strong>Finding:</strong> finding_id, genai_adoption_found, adoption_confidence, tool_name, use_case, business_function, evidence_summary, source_url, source_type, no_finding_reason</p>
+            </div>
+        </section>
+
+        <!-- PROGRESS -->
+        <section id="progress">
+            <span class="label">Implementation Status</span>
+            <h2>Current Progress</h2>
+            <p>What's been built, what's blocked, and what's next.</p>
+
+            <div class="progress-grid">
+                <div class="progress-category">
+                    <h4>Completed</h4>
+                    <div class="progress-item"><div class="progress-icon done"></div><span>Project setup & config</span></div>
+                    <div class="progress-item"><div class="progress-icon done"></div><span>Data loader + checkpointing</span></div>
+                    <div class="progress-item"><div class="progress-icon done"></div><span>Website health check (async)</span></div>
+                    <div class="progress-item"><div class="progress-icon done"></div><span>Tavily search integration</span></div>
+                    <div class="progress-item"><div class="progress-icon done"></div><span>GPT-4o-mini classifier</span></div>
+                    <div class="progress-item"><div class="progress-icon done"></div><span>Perplexity client (all tiers)</span></div>
+                    <div class="progress-item"><div class="progress-icon done"></div><span>Structured JSON prompts</span></div>
+                    <div class="progress-item"><div class="progress-icon done"></div><span>CSV output writer</span></div>
+                </div>
+                <div class="progress-category">
+                    <h4>Blocked</h4>
+                    <div class="progress-item"><div class="progress-icon blocked"></div><span>End-to-end testing (needs API keys)</span></div>
+                </div>
+                <div class="progress-category">
+                    <h4>Pending</h4>
+                    <div class="progress-item"><div class="progress-icon pending"></div><span>Stage 2/3 pipeline integration</span></div>
+                    <div class="progress-item"><div class="progress-icon pending"></div><span>Escalation logic</span></div>
+                    <div class="progress-item"><div class="progress-icon pending"></div><span>Pilot run (50-100 companies)</span></div>
+                    <div class="progress-item"><div class="progress-icon pending"></div><span>Cost validation</span></div>
+                    <div class="progress-item"><div class="progress-icon pending"></div><span>Full 44k run</span></div>
+                </div>
+            </div>
+
+            <div class="question-box" style="margin-top: 3rem;">
+                <h4>Open Questions for Prof. Bena</h4>
+                <ul>
+                    <li>Are the FindingType categories appropriate for the research paper?</li>
+                    <li>Should we modify any of the Perplexity prompts before the pilot run?</li>
+                    <li>What confidence threshold should we use for including findings in the paper?</li>
+                    <li>Should we prioritize precision (fewer false positives) or recall (fewer missed companies)?</li>
+                </ul>
+            </div>
+        </section>
+
+        <footer>
+            <p>AI-Enablement Deep Research Agent</p>
+            <p style="color: var(--text-muted);">UBC Sauder School of Business · January 2026</p>
+        </footer>
+    </main>
+
+    <script>
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) entry.target.classList.add('visible');
+            });
+        }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
+        document.querySelectorAll('section').forEach(s => observer.observe(s));
+        document.getElementById('hero').classList.add('visible');
+    </script>
+</body>
+</html>
