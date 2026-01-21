@@ -53,6 +53,93 @@ class Citation:
     snippet: Optional[str] = None
 
 
+@dataclass
+class GenAIFinding:
+    """
+    A single GenAI adoption finding from research.
+    
+    This is the structured output format that maps directly to CSV rows.
+    """
+    tool_name: Optional[str] = None  # ChatGPT, Claude, Copilot, etc.
+    use_case: Optional[str] = None   # customer_support, code_generation, etc.
+    business_function: Optional[str] = None  # Engineering, Marketing, HR, etc.
+    evidence_summary: Optional[str] = None
+    source_url: Optional[str] = None
+    source_type: Optional[str] = None  # company_blog, news, job_posting, etc.
+    confidence: float = 0.0
+
+
+@dataclass
+class ResearchResult:
+    """
+    Parsed research result from Perplexity.
+    
+    Contains structured findings ready for CSV export.
+    """
+    genai_adoption_found: bool = False
+    findings: list[GenAIFinding] = field(default_factory=list)
+    no_finding_reason: Optional[str] = None  # "insufficient_information" | "no_evidence"
+    raw_response: str = ""
+    parse_error: Optional[str] = None
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> "ResearchResult":
+        """
+        Parse a JSON response into a ResearchResult.
+        
+        Handles malformed JSON gracefully.
+        """
+        import json
+        
+        try:
+            # Try to extract JSON from the response (might have extra text)
+            json_str = json_str.strip()
+            
+            # Find JSON object boundaries
+            start = json_str.find('{')
+            end = json_str.rfind('}') + 1
+            
+            if start == -1 or end == 0:
+                return cls(
+                    raw_response=json_str,
+                    parse_error="No JSON object found in response"
+                )
+            
+            json_content = json_str[start:end]
+            data = json.loads(json_content)
+            
+            # Parse findings
+            findings = []
+            for f in data.get("findings", []):
+                findings.append(GenAIFinding(
+                    tool_name=f.get("tool_name"),
+                    use_case=f.get("use_case"),
+                    business_function=f.get("business_function"),
+                    evidence_summary=f.get("evidence_summary"),
+                    source_url=f.get("source_url"),
+                    source_type=f.get("source_type"),
+                    confidence=float(f.get("confidence", 0.0)),
+                ))
+            
+            return cls(
+                genai_adoption_found=bool(data.get("genai_adoption_found", False)),
+                findings=findings,
+                no_finding_reason=data.get("no_finding_reason"),
+                raw_response=json_str,
+            )
+            
+        except json.JSONDecodeError as e:
+            return cls(
+                raw_response=json_str,
+                parse_error=f"JSON parse error: {str(e)}"
+            )
+        except Exception as e:
+            return cls(
+                raw_response=json_str,
+                parse_error=f"Parse error: {str(e)}"
+            )
+
+
 @dataclass 
 class PerplexityResponse:
     """
@@ -64,12 +151,19 @@ class PerplexityResponse:
         model: Which model was used.
         usage: Token usage for cost tracking.
         error: Error message if request failed.
+        parsed: Structured research result (if successfully parsed).
     """
     content: str
     citations: list[Citation] = field(default_factory=list)
     model: str = ""
     usage: dict = field(default_factory=dict)
     error: Optional[str] = None
+    parsed: Optional[ResearchResult] = None
+    
+    def __post_init__(self):
+        """Auto-parse content into structured result."""
+        if self.content and not self.error and not self.parsed:
+            self.parsed = ResearchResult.from_json(self.content)
     
     @property
     def has_citations(self) -> bool:
@@ -85,6 +179,20 @@ class PerplexityResponse:
     def total_tokens(self) -> int:
         """Total tokens used (input + output)."""
         return self.usage.get("total_tokens", 0)
+    
+    @property
+    def findings(self) -> list[GenAIFinding]:
+        """Get parsed findings (empty list if parse failed)."""
+        if self.parsed:
+            return self.parsed.findings
+        return []
+    
+    @property
+    def adoption_found(self) -> bool:
+        """Did research find GenAI adoption?"""
+        if self.parsed:
+            return self.parsed.genai_adoption_found
+        return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
