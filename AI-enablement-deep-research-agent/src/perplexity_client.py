@@ -79,6 +79,8 @@ class ResearchResult:
     genai_adoption_found: bool = False
     findings: list[GenAIFinding] = field(default_factory=list)
     no_finding_reason: Optional[str] = None  # "insufficient_information" | "no_evidence"
+    recommend_escalation: bool = False  # Should this company be escalated to next stage?
+    escalation_reason: Optional[str] = None  # Why escalation is recommended
     raw_response: str = ""
     parse_error: Optional[str] = None
     
@@ -125,6 +127,8 @@ class ResearchResult:
                 genai_adoption_found=bool(data.get("genai_adoption_found", False)),
                 findings=findings,
                 no_finding_reason=data.get("no_finding_reason"),
+                recommend_escalation=bool(data.get("recommend_escalation", False)),
+                escalation_reason=data.get("escalation_reason"),
                 raw_response=json_str,
             )
             
@@ -193,24 +197,52 @@ class PerplexityResponse:
         if self.parsed:
             return self.parsed.genai_adoption_found
         return False
+    
+    @property
+    def recommend_escalation(self) -> bool:
+        """Should this company be escalated to the next research stage?"""
+        if self.parsed:
+            return self.parsed.recommend_escalation
+        return False
+    
+    @property
+    def escalation_reason(self) -> Optional[str]:
+        """Why escalation is recommended (if applicable)."""
+        if self.parsed:
+            return self.parsed.escalation_reason
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PROMPTS FOR GENAI ADOPTION RESEARCH
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_sonar_base_prompt(company_name: str, context: Optional[str] = None) -> str:
+def build_sonar_base_prompt(
+    company_name: str,
+    presence_score: int = 0,
+    ai_signals_summary: Optional[str] = None,
+    context: Optional[str] = None
+) -> str:
     """
     Build prompt for Stage 2A: Quick check with Sonar Base.
     
     Loads template from: prompts/stage_2a_quick_check.txt
+    
+    Args:
+        company_name: Name of the company to research.
+        presence_score: Online presence score from Stage 1 (0-100).
+        ai_signals_summary: Summary of AI signals found in Stage 1.
+        context: Optional context (e.g., Crunchbase description).
     """
     template = _load_prompt("stage_2a_quick_check.txt")
     
-    context_section = f"\nContext: {context}" if context else ""
+    context_section = f"\nCompany description: {context}" if context else ""
+    signals_summary = ai_signals_summary if ai_signals_summary else "None found in initial screening"
     
     return template.format(
         company_name=company_name,
+        presence_score=presence_score,
+        ai_signals_summary=signals_summary,
         context_section=context_section
     )
 
@@ -219,27 +251,41 @@ def build_sonar_pro_prompt(
     company_name: str, 
     homepage_url: Optional[str] = None,
     initial_signals: Optional[list[str]] = None,
+    presence_score: int = 0,
+    escalation_reason: Optional[str] = None,
     context: Optional[str] = None
 ) -> str:
     """
     Build prompt for Stage 2B: Deeper research with Sonar Pro.
     
     Loads template from: prompts/stage_2b_deep_check.txt
+    
+    Args:
+        company_name: Name of the company to research.
+        homepage_url: Company website for context.
+        initial_signals: AI signals found in Stage 1.
+        presence_score: Online presence score from Stage 1 (0-100).
+        escalation_reason: Why this company was escalated to Stage 2B.
+        context: Optional context (e.g., Crunchbase description).
     """
     template = _load_prompt("stage_2b_deep_check.txt")
     
     url_hint = f" (website: {homepage_url})" if homepage_url else ""
     
-    signals_section = ""
     if initial_signals:
-        signals_section = "\n\nInitial signals found:\n" + "\n".join(f"- {s}" for s in initial_signals)
+        signals_section = "\n".join(f"- {s}" for s in initial_signals)
+    else:
+        signals_section = "- General AI adoption signals detected"
     
-    context_section = f"\n\nAdditional context: {context}" if context else ""
+    escalation = escalation_reason if escalation_reason else "Promising signals found in initial screening"
+    context_section = f"\n\nCompany description: {context}" if context else ""
     
     return template.format(
         company_name=company_name,
         url_hint=url_hint,
         signals_section=signals_section,
+        presence_score=presence_score,
+        escalation_reason=escalation,
         context_section=context_section
     )
 
@@ -254,14 +300,22 @@ def build_deep_research_prompt(
     Build prompt for Stage 3: Deep Research.
     
     Loads template from: prompts/stage_3_deep_research.txt
+    
+    Args:
+        company_name: Name of the company to research.
+        homepage_url: Company website.
+        previous_findings: What earlier stages found (to verify and expand).
+        context: Company background information.
     """
     template = _load_prompt("stage_3_deep_research.txt")
     
     url_hint = f" (website: {homepage_url})" if homepage_url else ""
     
-    previous_section = ""
+    # Format previous findings for the template
     if previous_findings:
-        previous_section = f"\n\nPrevious research found:\n{previous_findings}\n\nDig deeper into these findings and look for additional evidence."
+        previous_section = previous_findings
+    else:
+        previous_section = "Initial stages found promising AI adoption signals but lacked specific details."
     
     context_section = f"\n\nCompany background: {context}" if context else ""
     
@@ -395,6 +449,8 @@ class PerplexityClient:
     async def quick_check(
         self,
         company_name: str,
+        presence_score: int = 0,
+        ai_signals_summary: Optional[str] = None,
         context: Optional[str] = None
     ) -> PerplexityResponse:
         """
@@ -405,6 +461,8 @@ class PerplexityClient:
         
         Args:
             company_name: Company to research.
+            presence_score: Online presence score from Stage 1 (0-100).
+            ai_signals_summary: Summary of AI signals found in Stage 1.
             context: Optional context (e.g., Crunchbase description).
         
         Returns:
@@ -413,17 +471,22 @@ class PerplexityClient:
         system_prompt = (
             "You are a research assistant investigating whether companies "
             "use generative AI tools in their business operations. "
-            "Be concise and factual. Cite your sources."
+            "Be concise and factual. Cite your sources. Respond with valid JSON only."
         )
         
-        user_prompt = build_sonar_base_prompt(company_name, context)
+        user_prompt = build_sonar_base_prompt(
+            company_name=company_name,
+            presence_score=presence_score,
+            ai_signals_summary=ai_signals_summary,
+            context=context
+        )
         
         return await self._make_request(
             model=SonarModel.SONAR_SMALL,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.1,
-            max_tokens=512,
+            max_tokens=768,  # Increased for new prompt structure
         )
     
     async def deep_check(
@@ -431,6 +494,8 @@ class PerplexityClient:
         company_name: str,
         homepage_url: Optional[str] = None,
         initial_signals: Optional[list[str]] = None,
+        presence_score: int = 0,
+        escalation_reason: Optional[str] = None,
         context: Optional[str] = None
     ) -> PerplexityResponse:
         """
@@ -443,6 +508,8 @@ class PerplexityClient:
             company_name: Company to research.
             homepage_url: Company website for context.
             initial_signals: AI signals found in Stage 1.
+            presence_score: Online presence score from Stage 1 (0-100).
+            escalation_reason: Why this company was escalated to Stage 2B.
             context: Optional additional context.
         
         Returns:
@@ -452,11 +519,16 @@ class PerplexityClient:
             "You are a thorough research assistant investigating generative AI "
             "adoption in business operations. Find specific, verifiable evidence "
             "with citations. Distinguish between companies that USE AI tools "
-            "versus companies that BUILD AI products."
+            "versus companies that BUILD AI products. Respond with valid JSON only."
         )
         
         user_prompt = build_sonar_pro_prompt(
-            company_name, homepage_url, initial_signals, context
+            company_name=company_name,
+            homepage_url=homepage_url,
+            initial_signals=initial_signals,
+            presence_score=presence_score,
+            escalation_reason=escalation_reason,
+            context=context
         )
         
         return await self._make_request(
@@ -464,7 +536,7 @@ class PerplexityClient:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.2,
-            max_tokens=1024,
+            max_tokens=1280,  # Increased for new prompt structure
         )
     
     async def deep_research(
@@ -491,13 +563,17 @@ class PerplexityClient:
         """
         system_prompt = (
             "You are an expert research analyst conducting comprehensive due diligence "
-            "on a company's adoption of generative AI tools. Investigate thoroughly, "
-            "verify claims with multiple sources, and provide detailed findings with "
-            "confidence levels. Focus on INTERNAL AI tool usage, not AI products they sell."
+            "on a company's adoption of generative AI tools for academic research. "
+            "Investigate thoroughly, verify claims with multiple sources, and provide "
+            "detailed findings with confidence levels. Focus on INTERNAL AI tool usage, "
+            "not AI products they sell. Respond with valid JSON only."
         )
         
         user_prompt = build_deep_research_prompt(
-            company_name, homepage_url, previous_findings, context
+            company_name=company_name,
+            homepage_url=homepage_url,
+            previous_findings=previous_findings,
+            context=context
         )
         
         return await self._make_request(
@@ -505,7 +581,7 @@ class PerplexityClient:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.3,
-            max_tokens=2048,
+            max_tokens=2560,  # Increased for comprehensive output
         )
 
 
@@ -525,19 +601,38 @@ def get_client(api_key: Optional[str] = None) -> PerplexityClient:
     return _client
 
 
-async def quick_check(company_name: str, context: Optional[str] = None) -> PerplexityResponse:
+async def quick_check(
+    company_name: str,
+    presence_score: int = 0,
+    ai_signals_summary: Optional[str] = None,
+    context: Optional[str] = None
+) -> PerplexityResponse:
     """Stage 2A: Quick check (async)."""
-    return await get_client().quick_check(company_name, context)
+    return await get_client().quick_check(
+        company_name=company_name,
+        presence_score=presence_score,
+        ai_signals_summary=ai_signals_summary,
+        context=context
+    )
 
 
 async def deep_check(
     company_name: str,
     homepage_url: Optional[str] = None,
     initial_signals: Optional[list[str]] = None,
+    presence_score: int = 0,
+    escalation_reason: Optional[str] = None,
     context: Optional[str] = None
 ) -> PerplexityResponse:
     """Stage 2B: Deep check (async)."""
-    return await get_client().deep_check(company_name, homepage_url, initial_signals, context)
+    return await get_client().deep_check(
+        company_name=company_name,
+        homepage_url=homepage_url,
+        initial_signals=initial_signals,
+        presence_score=presence_score,
+        escalation_reason=escalation_reason,
+        context=context
+    )
 
 
 async def deep_research(
@@ -547,23 +642,47 @@ async def deep_research(
     context: Optional[str] = None
 ) -> PerplexityResponse:
     """Stage 3: Deep research (async)."""
-    return await get_client().deep_research(company_name, homepage_url, previous_findings, context)
+    return await get_client().deep_research(
+        company_name=company_name,
+        homepage_url=homepage_url,
+        previous_findings=previous_findings,
+        context=context
+    )
 
 
 # Sync wrappers
-def quick_check_sync(company_name: str, context: Optional[str] = None) -> PerplexityResponse:
+def quick_check_sync(
+    company_name: str,
+    presence_score: int = 0,
+    ai_signals_summary: Optional[str] = None,
+    context: Optional[str] = None
+) -> PerplexityResponse:
     """Stage 2A: Quick check (sync)."""
-    return asyncio.run(quick_check(company_name, context))
+    return asyncio.run(quick_check(
+        company_name=company_name,
+        presence_score=presence_score,
+        ai_signals_summary=ai_signals_summary,
+        context=context
+    ))
 
 
 def deep_check_sync(
     company_name: str,
     homepage_url: Optional[str] = None,
     initial_signals: Optional[list[str]] = None,
+    presence_score: int = 0,
+    escalation_reason: Optional[str] = None,
     context: Optional[str] = None
 ) -> PerplexityResponse:
     """Stage 2B: Deep check (sync)."""
-    return asyncio.run(deep_check(company_name, homepage_url, initial_signals, context))
+    return asyncio.run(deep_check(
+        company_name=company_name,
+        homepage_url=homepage_url,
+        initial_signals=initial_signals,
+        presence_score=presence_score,
+        escalation_reason=escalation_reason,
+        context=context
+    ))
 
 
 def deep_research_sync(
@@ -573,4 +692,9 @@ def deep_research_sync(
     context: Optional[str] = None
 ) -> PerplexityResponse:
     """Stage 3: Deep research (sync)."""
-    return asyncio.run(deep_research(company_name, homepage_url, previous_findings, context))
+    return asyncio.run(deep_research(
+        company_name=company_name,
+        homepage_url=homepage_url,
+        previous_findings=previous_findings,
+        context=context
+    ))
