@@ -13,8 +13,10 @@ Cost: ~$0.011 per company ($0.01 Tavily + $0.001 GPT-4o-mini)
 """
 
 import asyncio
-from dataclasses import dataclass
-from typing import Optional
+import json as json_module
+from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
+from typing import IO, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -577,6 +579,8 @@ async def classify_company(
                 online_presence_score=int(result.get("online_presence_score", 0)),
                 research_priority=result.get("research_priority", "low"),
                 reasoning=result.get("reasoning", ""),
+                user_prompt=user_prompt,
+                raw_gpt_response=data,
             )
             
         except httpx.HTTPStatusError as e:
@@ -585,7 +589,8 @@ async def classify_company(
                 online_presence_score=0,
                 research_priority="skip",
                 reasoning="",
-                error=f"HTTP {e.response.status_code}: {e.response.text[:100]}"
+                error=f"HTTP {e.response.status_code}: {e.response.text[:100]}",
+                user_prompt=user_prompt,
             )
         except json.JSONDecodeError as e:
             return PresenceAssessment(
@@ -593,7 +598,8 @@ async def classify_company(
                 online_presence_score=0,
                 research_priority="skip",
                 reasoning="",
-                error=f"Failed to parse GPT response: {str(e)}"
+                error=f"Failed to parse GPT response: {str(e)}",
+                user_prompt=user_prompt,
             )
         except Exception as e:
             return PresenceAssessment(
@@ -601,7 +607,8 @@ async def classify_company(
                 online_presence_score=0,
                 research_priority="skip",
                 reasoning="",
-                error=f"{type(e).__name__}: {str(e)[:100]}"
+                error=f"{type(e).__name__}: {str(e)[:100]}",
+                user_prompt=user_prompt,
             )
 
 
@@ -655,13 +662,70 @@ class Stage1Result:
         return self.research_priority == "high"
 
 
+def _build_log_entry(
+    result: Stage1Result,
+    company_description: Optional[str] = None,
+    homepage_url: Optional[str] = None,
+) -> dict:
+    """
+    Build a JSON-serializable log entry from a Stage1Result.
+    
+    Captures everything: website check, Tavily raw response,
+    GPT input/output, and metadata. One entry = one line in JSONL.
+    
+    Args:
+        result: The completed Stage1Result.
+        company_description: Crunchbase description (not stored in result).
+        homepage_url: Company URL (not stored in result).
+    
+    Returns:
+        Dictionary ready for json.dumps().
+    """
+    ws = result.website_status
+    sr = result.search_result
+    assess = result.assessment
+    
+    return {
+        "company_id": result.company_id,
+        "company_name": result.company_name,
+        "company_description": company_description,
+        "homepage_url": homepage_url,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "website_check": {
+            "url": ws.url,
+            "is_alive": ws.is_alive,
+            "status_code": ws.status_code,
+            "final_url": ws.final_url,
+            "is_redirect": ws.is_redirect,
+            "error": ws.error,
+        },
+        "tavily": {
+            "query": sr.query,
+            "result_count": sr.result_count,
+            "raw_response": sr.raw_response,
+        },
+        "gpt": {
+            "user_prompt": assess.user_prompt,
+            "raw_response": assess.raw_gpt_response,
+            "parsed": {
+                "online_presence_score": assess.online_presence_score,
+                "research_priority": assess.research_priority,
+                "reasoning": assess.reasoning,
+            },
+            "error": assess.error,
+        },
+        "estimated_cost_usd": result.estimated_cost,
+    }
+
+
 async def run_stage_1(
     company_id: int,
     company_name: str,
     homepage_url: Optional[str],
     company_description: Optional[str],
     tavily_api_key: Optional[str] = None,
-    openai_api_key: Optional[str] = None
+    openai_api_key: Optional[str] = None,
+    log_file: Optional[IO] = None
 ) -> Stage1Result:
     """
     Run the complete Stage 1 presence filter for a single company.
@@ -678,6 +742,8 @@ async def run_stage_1(
         company_description: Crunchbase description.
         tavily_api_key: Tavily API key.
         openai_api_key: OpenAI API key.
+        log_file: Optional open file handle for JSONL logging.
+            If provided, a full log entry is written after processing.
     
     Returns:
         Stage1Result with all component results and research priority.
@@ -702,7 +768,7 @@ async def run_stage_1(
         api_key=openai_api_key
     )
     
-    return Stage1Result(
+    result = Stage1Result(
         company_name=company_name,
         company_id=company_id,
         website_status=website_status,
@@ -711,6 +777,14 @@ async def run_stage_1(
         presence_score=assessment.online_presence_score,
         research_priority=assessment.research_priority,
     )
+    
+    # Write JSONL log entry if log file is provided
+    if log_file is not None:
+        entry = _build_log_entry(result, company_description, homepage_url)
+        log_file.write(json_module.dumps(entry) + "\n")
+        log_file.flush()  # Flush after each company for crash safety
+    
+    return result
 
 
 def run_stage_1_sync(
@@ -719,10 +793,11 @@ def run_stage_1_sync(
     homepage_url: Optional[str],
     company_description: Optional[str],
     tavily_api_key: Optional[str] = None,
-    openai_api_key: Optional[str] = None
+    openai_api_key: Optional[str] = None,
+    log_file: Optional[IO] = None
 ) -> Stage1Result:
     """Synchronous wrapper for run_stage_1."""
     return asyncio.run(run_stage_1(
         company_id, company_name, homepage_url, company_description,
-        tavily_api_key, openai_api_key
+        tavily_api_key, openai_api_key, log_file
     ))
