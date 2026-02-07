@@ -6,6 +6,10 @@ Runs the full pipeline:
 2. Tavily search (advanced, 5 results)
 3. GPT-4o-mini classification
 
+Outputs:
+- outputs/stage1/stage1_run_<timestamp>.jsonl  (full logs per company)
+- outputs/stage1/stage1_run_<timestamp>.csv    (summary CSV)
+
 Usage:
     python test_stage_1.py
 """
@@ -14,12 +18,14 @@ import asyncio
 import csv
 import random
 import time
+from datetime import datetime
 from pathlib import Path
 
 # Add src to path so imports work
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
+from src.config import STAGE1_OUTPUT_DIR
 from src.stage_1_filter import run_stage_1
 
 # Paths
@@ -37,35 +43,11 @@ def load_random_companies(n: int = 50) -> list[dict]:
 
 async def main():
     # Load API keys
-    keys = None
-    try:
-        from config import APIKeys
-        keys = APIKeys()
-    except ImportError:
-        pass
+    from src.config import APIKeys
+    keys = APIKeys()
     
-    if not keys:
-        # Manual load
-        creds_dir = BASE_DIR / "credentials"
-        tavily_key = ""
-        openai_key = ""
-        
-        tavily_file = creds_dir / "tavily_api_key.txt"
-        if tavily_file.exists():
-            lines = [l.strip() for l in tavily_file.read_text().split('\n') 
-                     if l.strip() and not l.strip().startswith('#')]
-            if lines:
-                tavily_key = lines[0]
-        
-        openai_file = creds_dir / "openai_api_key.txt"
-        if openai_file.exists():
-            lines = [l.strip() for l in openai_file.read_text().split('\n') 
-                     if l.strip() and not l.strip().startswith('#')]
-            if lines:
-                openai_key = lines[0]
-    else:
-        tavily_key = keys.tavily
-        openai_key = keys.openai
+    tavily_key = keys.tavily
+    openai_key = keys.openai
     
     print(f"Tavily key: {'✓' if tavily_key else '✗'}")
     print(f"OpenAI key: {'✓' if openai_key else '✗'}")
@@ -79,72 +61,81 @@ async def main():
     print(f"\nLoaded {len(companies)} random companies.")
     print(f"Estimated cost: ~50 x $0.021 = $1.05 (Tavily advanced + GPT-4o-mini)")
     
+    # Output paths
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    jsonl_path = STAGE1_OUTPUT_DIR / f"stage1_run_{timestamp}.jsonl"
+    csv_path = STAGE1_OUTPUT_DIR / f"stage1_run_{timestamp}.csv"
+    
+    print(f"\nLogs:    {jsonl_path}")
+    print(f"Summary: {csv_path}")
+    
     input("\nPress Enter to start (or Ctrl+C to cancel)...")
     
     start_time = time.time()
     
-    # Run Stage 1 for each company
+    # Open JSONL log file and run pipeline
     results = []
-    for i, company in enumerate(companies, 1):
-        name = company['name']
-        homepage = company.get('homepage_url', '')
-        desc = company.get('short_description', '')
-        rcid = company.get('rcid', i)
-        
-        print(f"\n[{i}/50] {name}...", end=" ", flush=True)
-        
-        try:
-            result = await run_stage_1(
-                company_id=int(rcid) if str(rcid).isdigit() else i,
-                company_name=name,
-                homepage_url=homepage or None,
-                company_description=desc or None,
-                tavily_api_key=tavily_key,
-                openai_api_key=openai_key
-            )
+    with open(jsonl_path, 'w') as log_file:
+        for i, company in enumerate(companies, 1):
+            name = company['name']
+            homepage = company.get('homepage_url', '')
+            desc = company.get('short_description', '')
+            rcid = company.get('rcid', i)
             
-            priority = result.research_priority
-            score = result.presence_score
-            reasoning = result.assessment.reasoning if result.assessment else ""
+            print(f"\n[{i}/50] {name}...", end=" ", flush=True)
             
-            # Color-coded priority
-            priority_display = {
-                "high": f"HIGH ({score})",
-                "medium": f"MEDIUM ({score})",
-                "low": f"LOW ({score})",
-                "skip": f"SKIP ({score})",
-            }.get(priority, priority)
+            try:
+                result = await run_stage_1(
+                    company_id=int(rcid) if str(rcid).isdigit() else i,
+                    company_name=name,
+                    homepage_url=homepage or None,
+                    company_description=desc or None,
+                    tavily_api_key=tavily_key,
+                    openai_api_key=openai_key,
+                    log_file=log_file
+                )
+                
+                priority = result.research_priority
+                score = result.presence_score
+                reasoning = result.assessment.reasoning if result.assessment else ""
+                
+                priority_display = {
+                    "high": f"HIGH ({score})",
+                    "medium": f"MEDIUM ({score})",
+                    "low": f"LOW ({score})",
+                    "skip": f"SKIP ({score})",
+                }.get(priority, priority)
+                
+                print(f"{priority_display} — {reasoning[:60]}")
+                
+                results.append({
+                    'name': name,
+                    'homepage': homepage,
+                    'description': desc[:80],
+                    'priority': priority,
+                    'score': score,
+                    'reasoning': reasoning,
+                    'website_alive': result.website_status.is_alive if result.website_status else False,
+                    'search_results': result.search_result.result_count if result.search_result else 0,
+                    'error': result.assessment.error if result.assessment else None,
+                })
+                
+            except Exception as e:
+                print(f"ERROR: {e}")
+                results.append({
+                    'name': name,
+                    'homepage': homepage,
+                    'description': desc[:80],
+                    'priority': 'error',
+                    'score': 0,
+                    'reasoning': str(e),
+                    'website_alive': False,
+                    'search_results': 0,
+                    'error': str(e),
+                })
             
-            print(f"{priority_display} — {reasoning[:60]}")
-            
-            results.append({
-                'name': name,
-                'homepage': homepage,
-                'description': desc[:80],
-                'priority': priority,
-                'score': score,
-                'reasoning': reasoning,
-                'website_alive': result.website_status.is_alive if result.website_status else False,
-                'search_results': result.search_result.result_count if result.search_result else 0,
-                'error': result.assessment.error if result.assessment else None,
-            })
-            
-        except Exception as e:
-            print(f"ERROR: {e}")
-            results.append({
-                'name': name,
-                'homepage': homepage,
-                'description': desc[:80],
-                'priority': 'error',
-                'score': 0,
-                'reasoning': str(e),
-                'website_alive': False,
-                'search_results': 0,
-                'error': str(e),
-            })
-        
-        # Small delay to avoid rate limits
-        await asyncio.sleep(0.5)
+            # Small delay to avoid rate limits
+            await asyncio.sleep(0.5)
     
     elapsed = time.time() - start_time
     
@@ -169,6 +160,16 @@ async def main():
     if scores:
         print(f"\nPresence Scores:")
         print(f"  Min: {min(scores)}, Max: {max(scores)}, Avg: {sum(scores)/len(scores):.0f}")
+        
+        # Histogram to check for clustering
+        print(f"\n  Score histogram:")
+        buckets = {}
+        for s in scores:
+            bucket = (s // 10) * 10
+            buckets[bucket] = buckets.get(bucket, 0) + 1
+        for bucket in sorted(buckets.keys()):
+            count = buckets[bucket]
+            print(f"    {bucket:3}-{bucket+9:3}: {'█' * count} ({count})")
     
     # Website status
     alive = sum(1 for r in results if r['website_alive'])
@@ -179,9 +180,8 @@ async def main():
     zero_results = sum(1 for c in search_counts if c == 0)
     print(f"Search Results: {zero_results}/{len(results)} with zero results")
     
-    # Save results to CSV
-    output_file = BASE_DIR / "outputs" / "stage_1_test_results.csv"
-    with open(output_file, 'w', newline='') as f:
+    # Save summary CSV
+    with open(csv_path, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=[
             'name', 'homepage', 'description', 'priority', 'score',
             'reasoning', 'website_alive', 'search_results', 'error'
@@ -189,7 +189,8 @@ async def main():
         writer.writeheader()
         writer.writerows(results)
     
-    print(f"\nResults saved to: {output_file}")
+    print(f"\nFull logs: {jsonl_path}")
+    print(f"Summary CSV: {csv_path}")
     
     # Show high priority companies
     high = [r for r in results if r['priority'] == 'high']
