@@ -1,15 +1,15 @@
 """
 Stage 1: Presence Filter
 
-The first stage of the pipeline. Determines online presence and
-routes companies to appropriate subsequent stages.
+The first stage of the pipeline. Gathers general company intelligence
+and predicts research priority for subsequent deep research stages.
 
 Components:
     1. Website health check (HEAD request)
-    2. Tavily search for AI mentions
-    3. GPT-4o-mini interpretation and routing decision
+    2. Tavily search for general company information
+    3. GPT-4o-mini analysis to predict research priority
 
-Cost: ~$0.002 per company
+Cost: ~$0.011 per company ($0.01 Tavily + $0.001 GPT-4o-mini)
 """
 
 import asyncio
@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from .config import PROCESSING, APIKeys
+from .config import PROCESSING, APIKeys, PROMPTS_DIR
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -227,120 +227,71 @@ class SearchSnippet:
 @dataclass
 class TavilySearchResult:
     """
-    Result from a Tavily search for AI mentions.
+    Result from a Tavily search for general company information.
     
     Attributes:
         company_name: The company we searched for.
         query: The exact query used.
         snippets: List of relevant search result snippets.
-        ai_keywords_found: AI-related keywords found in snippets.
-        has_ai_mentions: Quick boolean - did we find any AI mentions?
+        result_count: Number of results returned (indicator of online presence).
         error: Error message if search failed.
     """
     company_name: str
     query: str
     snippets: list[SearchSnippet]
-    ai_keywords_found: list[str]
-    has_ai_mentions: bool
+    result_count: int
     raw_response: Optional[dict] = None
     error: Optional[str] = None
 
 
-# AI-related keywords to look for in search results
-AI_KEYWORDS = [
-    # GenAI tools
-    "chatgpt", "gpt-4", "gpt-5", "openai", "claude", "anthropic",
-    "copilot", "github copilot", "gemini", "bard",
-    # General AI terms
-    "generative ai", "genai", "gen ai", "large language model", "llm",
-    "ai assistant", "ai-powered", "ai powered", "artificial intelligence",
-    "machine learning", "ml model",
-    # AI adoption signals
-    "uses ai", "using ai", "adopted ai", "implementing ai",
-    "ai tools", "ai platform", "ai solution",
-    # Specific use cases
-    "ai automation", "ai chatbot", "ai customer service",
-    "ai content", "ai writing", "ai coding",
-]
-
-
-def build_search_query(company_name: str, homepage_url: Optional[str] = None) -> str:
+def build_search_query(
+    company_name: str,
+    homepage_url: Optional[str] = None,
+    company_description: Optional[str] = None
+) -> str:
     """
-    Build an optimized search query for finding GenAI adoption evidence.
+    Build a natural language search query for company information.
     
-    The query is designed to find:
-    - News about the company using AI tools
-    - Blog posts or announcements about AI adoption
-    - Job postings mentioning AI tools
+    Uses a conversational format that works well with Tavily's search API
+    and avoids overly restrictive constraints (like site:) that can cause
+    zero results for lesser-known companies.
+    
+    Example output:
+    - "provide me information on the company Blue Dot"
     
     Args:
         company_name: Name of the company.
-        homepage_url: Company's website URL (used to extract domain).
+        homepage_url: Not used (kept for API compatibility).
+        company_description: Not used (kept for API compatibility).
     
     Returns:
-        Search query string.
+        Natural language search query string.
     """
-    # Extract domain if available (helps with disambiguation)
-    domain_hint = ""
-    if homepage_url:
-        try:
-            domain = urlparse(homepage_url).netloc.replace("www.", "")
-            if domain:
-                domain_hint = f" site:{domain} OR"
-        except Exception:
-            pass
-    
-    # Build query: company name + AI-related terms
-    # We use OR to cast a wide net while keeping it focused
-    query = (
-        f'"{company_name}"{domain_hint} '
-        f'(ChatGPT OR "AI tools" OR "generative AI" OR Copilot OR '
-        f'"artificial intelligence" OR "machine learning" OR "AI-powered")'
-    )
-    
-    return query
-
-
-def _extract_ai_keywords(text: str) -> list[str]:
-    """
-    Extract AI-related keywords found in text.
-    
-    Args:
-        text: Text to search for keywords.
-    
-    Returns:
-        List of found keywords (deduplicated, lowercase).
-    """
-    text_lower = text.lower()
-    found = set()
-    
-    for keyword in AI_KEYWORDS:
-        if keyword.lower() in text_lower:
-            found.add(keyword.lower())
-    
-    return sorted(found)
+    return f"provide me information on the company {company_name}"
 
 
 async def search_tavily(
     company_name: str,
     homepage_url: Optional[str] = None,
+    company_description: Optional[str] = None,
     api_key: Optional[str] = None,
     max_results: int = 5
 ) -> TavilySearchResult:
     """
-    Search Tavily for AI adoption mentions about a company.
+    Search Tavily for general company information.
     
     This is a controlled, single search per company to ensure
-    predictable costs (~$0.001 per search).
+    predictable costs (~$0.01 per search).
     
     Args:
         company_name: Name of the company to search for.
-        homepage_url: Company's website (helps with disambiguation).
+        homepage_url: Company's website (for domain constraint).
+        company_description: Crunchbase description (for disambiguation).
         api_key: Tavily API key. Uses credentials folder or env var if not provided.
         max_results: Maximum number of results to return.
     
     Returns:
-        TavilySearchResult with snippets and AI mention detection.
+        TavilySearchResult with general company information snippets.
     """
     if not api_key:
         keys = APIKeys()
@@ -351,12 +302,11 @@ async def search_tavily(
             company_name=company_name,
             query="",
             snippets=[],
-            ai_keywords_found=[],
-            has_ai_mentions=False,
+            result_count=0,
             error="Tavily API key not set. Add to credentials/tavily_api_key.txt"
         )
     
-    query = build_search_query(company_name, homepage_url)
+    query = build_search_query(company_name, homepage_url, company_description)
     
     async with httpx.AsyncClient(timeout=PROCESSING.api_timeout) as client:
         try:
@@ -365,7 +315,7 @@ async def search_tavily(
                 json={
                     "api_key": api_key,
                     "query": query,
-                    "search_depth": "basic",  # "basic" is cheaper than "advanced"
+                    "search_depth": "advanced",  # Better results for lesser-known companies
                     "max_results": max_results,
                     "include_answer": False,  # We don't need summarization
                     "include_raw_content": False,  # Keep response small
@@ -376,8 +326,6 @@ async def search_tavily(
             
             # Parse results into snippets
             snippets = []
-            all_text = ""
-            
             for result in data.get("results", []):
                 snippet = SearchSnippet(
                     title=result.get("title", ""),
@@ -386,17 +334,12 @@ async def search_tavily(
                     score=result.get("score", 0.0),
                 )
                 snippets.append(snippet)
-                all_text += f" {snippet.title} {snippet.content}"
-            
-            # Extract AI keywords from all text
-            ai_keywords = _extract_ai_keywords(all_text)
             
             return TavilySearchResult(
                 company_name=company_name,
                 query=query,
                 snippets=snippets,
-                ai_keywords_found=ai_keywords,
-                has_ai_mentions=len(ai_keywords) > 0,
+                result_count=len(snippets),
                 raw_response=data,
             )
             
@@ -405,8 +348,7 @@ async def search_tavily(
                 company_name=company_name,
                 query=query,
                 snippets=[],
-                ai_keywords_found=[],
-                has_ai_mentions=False,
+                result_count=0,
                 error=f"HTTP {e.response.status_code}: {e.response.text[:100]}"
             )
         except Exception as e:
@@ -414,14 +356,13 @@ async def search_tavily(
                 company_name=company_name,
                 query=query,
                 snippets=[],
-                ai_keywords_found=[],
-                has_ai_mentions=False,
+                result_count=0,
                 error=f"{type(e).__name__}: {str(e)[:100]}"
             )
 
 
 async def search_tavily_batch(
-    companies: list[tuple[str, Optional[str]]],  # (name, homepage_url)
+    companies: list[tuple[str, Optional[str], Optional[str]]],  # (name, homepage_url, description)
     api_key: Optional[str] = None,
     max_concurrent: int = 5  # Tavily rate limits are stricter
 ) -> list[TavilySearchResult]:
@@ -429,7 +370,7 @@ async def search_tavily_batch(
     Search Tavily for multiple companies concurrently.
     
     Args:
-        companies: List of (company_name, homepage_url) tuples.
+        companies: List of (company_name, homepage_url, description) tuples.
         api_key: Tavily API key.
         max_concurrent: Maximum simultaneous requests (default 5 for Tavily).
     
@@ -438,11 +379,11 @@ async def search_tavily_batch(
     """
     semaphore = asyncio.Semaphore(max_concurrent)
     
-    async def search_with_semaphore(name: str, url: Optional[str]) -> TavilySearchResult:
+    async def search_with_semaphore(name: str, url: Optional[str], desc: Optional[str]) -> TavilySearchResult:
         async with semaphore:
-            return await search_tavily(name, url, api_key)
+            return await search_tavily(name, url, desc, api_key)
     
-    tasks = [search_with_semaphore(name, url) for name, url in companies]
+    tasks = [search_with_semaphore(name, url, desc) for name, url, desc in companies]
     return await asyncio.gather(*tasks)
 
 
@@ -453,14 +394,15 @@ async def search_tavily_batch(
 def search_tavily_sync(
     company_name: str,
     homepage_url: Optional[str] = None,
+    company_description: Optional[str] = None,
     api_key: Optional[str] = None
 ) -> TavilySearchResult:
     """Synchronous wrapper for search_tavily."""
-    return asyncio.run(search_tavily(company_name, homepage_url, api_key))
+    return asyncio.run(search_tavily(company_name, homepage_url, company_description, api_key))
 
 
 def search_tavily_batch_sync(
-    companies: list[tuple[str, Optional[str]]],
+    companies: list[tuple[str, Optional[str], Optional[str]]],
     api_key: Optional[str] = None
 ) -> list[TavilySearchResult]:
     """Synchronous wrapper for search_tavily_batch."""
@@ -474,42 +416,55 @@ def search_tavily_batch_sync(
 @dataclass
 class PresenceAssessment:
     """
-    GPT-4o-mini's assessment of a company's online presence and AI signals.
+    GPT-4o-mini's assessment of a company's profile and research priority.
     
     This is the output of Stage 1 and determines routing to subsequent stages.
+    Includes raw API data for logging/auditing.
     """
     company_name: str
-    
-    # Presence assessment
     online_presence_score: int  # 0-100
-    presence_reasoning: str
-    
-    # AI signal detection
-    ai_mentions_found: bool
-    ai_signals: list[str]  # Specific signals found (e.g., "mentions ChatGPT in blog")
-    
-    # Routing decision
-    recommended_stage: str  # "2A", "2B", "3", or "stop"
-    routing_reasoning: str
-    
-    # Metadata
+    research_priority: str  # "high", "medium", "low", "skip"
+    reasoning: str  # Brief explanation for the score
     error: Optional[str] = None
+    
+    # Raw data for logging — not used for routing, but preserved for auditing
+    user_prompt: Optional[str] = None  # The exact prompt sent to GPT
+    raw_gpt_response: Optional[dict] = None  # Full OpenAI API response
 
 
-# System prompt for the classifier
-CLASSIFIER_SYSTEM_PROMPT = """You are an AI research assistant helping identify evidence of GenAI adoption in business operations.
+def _load_system_prompt() -> str:
+    """
+    Load the classifier system prompt from the prompts file.
+    
+    Returns:
+        The system prompt string.
+    """
+    prompt_file = PROMPTS_DIR / "stage_1_classifier.txt"
+    
+    if not prompt_file.exists():
+        raise FileNotFoundError(f"Prompt file not found: {prompt_file}")
+    
+    content = prompt_file.read_text()
+    
+    # Extract only the SYSTEM PROMPT section (between "## SYSTEM PROMPT" and "---")
+    lines = content.split('\n')
+    in_system_prompt = False
+    system_prompt_lines = []
+    
+    for line in lines:
+        if line.strip() == "## SYSTEM PROMPT":
+            in_system_prompt = True
+            continue
+        if in_system_prompt and line.strip() == "---":
+            break
+        if in_system_prompt:
+            system_prompt_lines.append(line)
+    
+    return '\n'.join(system_prompt_lines).strip()
 
-Your task: Analyze the provided information about a company and assess:
-1. Their online presence (how much information is available about them)
-2. Whether there are any signals they might be using GenAI tools internally
 
-IMPORTANT DISTINCTIONS:
-- We care about INTERNAL GenAI usage (using ChatGPT for customer support, Copilot for coding, AI for content generation)
-- We do NOT care about companies that BUILD AI products - we want companies that USE AI tools
-- A company selling "AI-powered analytics" is NOT what we're looking for
-- A company using "ChatGPT to respond to customer emails" IS what we're looking for
-
-Respond with a JSON object containing your assessment."""
+# Load system prompt from file (cached at module load time)
+CLASSIFIER_SYSTEM_PROMPT = _load_system_prompt()
 
 
 def _build_classifier_prompt(
@@ -521,75 +476,33 @@ def _build_classifier_prompt(
     """
     Build the user prompt for the classifier.
     
-    Combines all available information into a structured prompt.
+    Includes full Tavily results for comprehensive assessment.
     """
-    # Website status section
+    # Website status (one line)
     if website_status.is_alive:
-        website_info = f"Website ({website_status.url}): ACTIVE (responded with {website_status.status_code})"
-        if website_status.is_redirect:
-            website_info += f"\n  → Redirected to: {website_status.final_url}"
+        website_info = f"ACTIVE ({website_status.status_code})"
     else:
-        website_info = f"Website: INACTIVE or UNREACHABLE ({website_status.error})"
+        website_info = f"DOWN ({website_status.error})"
     
-    # Search results section
+    # Search results - full content from all snippets
     if search_result.error:
-        search_info = f"Search failed: {search_result.error}"
-    elif not search_result.snippets:
-        search_info = "Search returned no results."
+        search_info = f"Search error: {search_result.error}"
+    elif search_result.result_count == 0:
+        search_info = "No search results found."
     else:
-        search_info = f"Search found {len(search_result.snippets)} results:\n"
-        for i, snippet in enumerate(search_result.snippets[:5], 1):
-            search_info += f"\n{i}. {snippet.title}\n"
-            search_info += f"   URL: {snippet.url}\n"
-            search_info += f"   Content: {snippet.content[:300]}...\n"
+        # Include ALL snippets with FULL content
+        snippets = []
+        for i, snippet in enumerate(search_result.snippets, 1):
+            snippets.append(f"{i}. {snippet.title}\n   URL: {snippet.url}\n   {snippet.content}")
+        search_info = "\n\n".join(snippets)
     
-    # AI keywords found
-    if search_result.ai_keywords_found:
-        ai_keywords_info = f"AI-related keywords detected: {', '.join(search_result.ai_keywords_found)}"
-    else:
-        ai_keywords_info = "No AI-related keywords detected in search results."
-    
-    prompt = f"""## Company: {company_name}
+    prompt = f"""Company: {company_name}
+Description: {company_description or "None"}
+Website: {website_info}
 
-### Company Description (from Crunchbase)
-{company_description or "No description available."}
+Search results ({search_result.result_count} found):
 
-### Website Status
-{website_info}
-
-### Web Search Results
-Query: {search_result.query}
-{search_info}
-
-### AI Keyword Analysis
-{ai_keywords_info}
-
----
-
-Based on this information, provide your assessment as JSON:
-
-```json
-{{
-  "online_presence_score": <0-100>,
-  "presence_reasoning": "<brief explanation of score>",
-  "ai_mentions_found": <true/false>,
-  "ai_signals": ["<specific signal 1>", "<specific signal 2>", ...],
-  "recommended_stage": "<2A|2B|stop>",
-  "routing_reasoning": "<why this routing decision>"
-}}
-```
-
-ROUTING GUIDELINES:
-- "stop": No web presence AND no AI signals → mark as "insufficient information"
-- "2A": Low presence OR no AI signals → quick Sonar Base check
-- "2B": Good presence AND AI signals found → deeper Sonar Pro investigation
-
-Score guidelines:
-- 0-20: Virtually no online presence (dead website, no search results)
-- 21-40: Minimal presence (few search results, basic info only)
-- 41-60: Moderate presence (active website, some news/mentions)
-- 61-80: Good presence (multiple sources, recent activity)
-- 81-100: Strong presence (well-documented company, many sources)"""
+{search_info}"""
 
     return prompt
 
@@ -602,10 +515,7 @@ async def classify_company(
     api_key: Optional[str] = None
 ) -> PresenceAssessment:
     """
-    Use GPT-4o-mini to classify a company's online presence and AI signals.
-    
-    This is the "brain" of Stage 1 - it interprets the raw data and makes
-    the routing decision for subsequent stages.
+    Use GPT-4o-mini to assess a company's profile and predict research priority.
     
     Args:
         company_name: Name of the company.
@@ -615,7 +525,7 @@ async def classify_company(
         api_key: OpenAI API key. Uses env var if not provided.
     
     Returns:
-        PresenceAssessment with scores, signals, and routing decision.
+        PresenceAssessment with online_presence_score and research_priority.
     """
     import json
     
@@ -627,11 +537,8 @@ async def classify_company(
         return PresenceAssessment(
             company_name=company_name,
             online_presence_score=0,
-            presence_reasoning="",
-            ai_mentions_found=False,
-            ai_signals=[],
-            recommended_stage="stop",
-            routing_reasoning="",
+            research_priority="skip",
+            reasoning="",
             error="OpenAI API key not set. Add to credentials/openai_api_key.txt"
         )
     
@@ -654,7 +561,7 @@ async def classify_company(
                         {"role": "user", "content": user_prompt},
                     ],
                     "temperature": 0.1,  # Low temperature for consistent classification
-                    "max_tokens": 500,
+                    "max_tokens": 150,  # Lean output: score, priority, reasoning
                     "response_format": {"type": "json_object"},
                 }
             )
@@ -668,44 +575,32 @@ async def classify_company(
             return PresenceAssessment(
                 company_name=company_name,
                 online_presence_score=int(result.get("online_presence_score", 0)),
-                presence_reasoning=result.get("presence_reasoning", ""),
-                ai_mentions_found=bool(result.get("ai_mentions_found", False)),
-                ai_signals=result.get("ai_signals", []),
-                recommended_stage=result.get("recommended_stage", "2A"),
-                routing_reasoning=result.get("routing_reasoning", ""),
+                research_priority=result.get("research_priority", "low"),
+                reasoning=result.get("reasoning", ""),
             )
             
         except httpx.HTTPStatusError as e:
             return PresenceAssessment(
                 company_name=company_name,
                 online_presence_score=0,
-                presence_reasoning="",
-                ai_mentions_found=False,
-                ai_signals=[],
-                recommended_stage="stop",
-                routing_reasoning="",
+                research_priority="skip",
+                reasoning="",
                 error=f"HTTP {e.response.status_code}: {e.response.text[:100]}"
             )
         except json.JSONDecodeError as e:
             return PresenceAssessment(
                 company_name=company_name,
                 online_presence_score=0,
-                presence_reasoning="",
-                ai_mentions_found=False,
-                ai_signals=[],
-                recommended_stage="stop",
-                routing_reasoning="",
+                research_priority="skip",
+                reasoning="",
                 error=f"Failed to parse GPT response: {str(e)}"
             )
         except Exception as e:
             return PresenceAssessment(
                 company_name=company_name,
                 online_presence_score=0,
-                presence_reasoning="",
-                ai_mentions_found=False,
-                ai_signals=[],
-                recommended_stage="stop",
-                routing_reasoning="",
+                research_priority="skip",
+                reasoning="",
                 error=f"{type(e).__name__}: {str(e)[:100]}"
             )
 
@@ -744,8 +639,7 @@ class Stage1Result:
     
     # Summary for easy access
     presence_score: int
-    ai_mentions_found: bool
-    next_stage: str
+    research_priority: str  # "high", "medium", "low", "skip"
     
     # Cost tracking
     estimated_cost: float = 0.011  # $0.01 Tavily + $0.001 GPT-4o-mini
@@ -753,7 +647,12 @@ class Stage1Result:
     @property
     def should_continue(self) -> bool:
         """Should this company proceed to Stage 2?"""
-        return self.next_stage in ("2A", "2B", "3")
+        return self.research_priority != "skip"
+    
+    @property
+    def is_high_priority(self) -> bool:
+        """Is this a high priority company for deep research?"""
+        return self.research_priority == "high"
 
 
 async def run_stage_1(
@@ -769,8 +668,8 @@ async def run_stage_1(
     
     This orchestrates:
     1. Website health check
-    2. Tavily search for AI mentions
-    3. GPT-4o-mini classification and routing
+    2. Tavily search for general company information
+    3. GPT-4o-mini analysis to predict research priority
     
     Args:
         company_id: Unique identifier (rcid from Crunchbase).
@@ -781,19 +680,20 @@ async def run_stage_1(
         openai_api_key: OpenAI API key.
     
     Returns:
-        Stage1Result with all component results and routing decision.
+        Stage1Result with all component results and research priority.
     """
     # Step 1: Check website
     website_status = await check_website(homepage_url or "")
     
-    # Step 2: Search for AI mentions
+    # Step 2: Search for general company information
     search_result = await search_tavily(
         company_name, 
         homepage_url,
+        company_description,
         api_key=tavily_api_key
     )
     
-    # Step 3: Classify and route
+    # Step 3: Analyze and assign research priority
     assessment = await classify_company(
         company_name,
         company_description,
@@ -809,8 +709,7 @@ async def run_stage_1(
         search_result=search_result,
         assessment=assessment,
         presence_score=assessment.online_presence_score,
-        ai_mentions_found=assessment.ai_mentions_found,
-        next_stage=assessment.recommended_stage,
+        research_priority=assessment.research_priority,
     )
 
 

@@ -23,8 +23,14 @@ CHECKPOINT_DIR = PROJECT_ROOT / "checkpoints"
 CREDENTIALS_DIR = PROJECT_ROOT / "credentials"
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
 
+# Stage-specific output directories
+STAGE1_OUTPUT_DIR = OUTPUT_DIR / "stage1"
+STAGE2_OUTPUT_DIR = OUTPUT_DIR / "stage2"
+STAGE3_OUTPUT_DIR = OUTPUT_DIR / "stage3"
+
 # Ensure directories exist
-for dir_path in [OUTPUT_DIR, LOG_DIR, CHECKPOINT_DIR]:
+for dir_path in [OUTPUT_DIR, LOG_DIR, CHECKPOINT_DIR,
+                 STAGE1_OUTPUT_DIR, STAGE2_OUTPUT_DIR, STAGE3_OUTPUT_DIR]:
     dir_path.mkdir(exist_ok=True)
 
 
