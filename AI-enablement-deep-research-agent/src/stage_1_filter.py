@@ -424,7 +424,7 @@ class PresenceAssessment:
     Includes raw API data for logging/auditing.
     """
     company_name: str
-    online_presence_score: int  # 0-100
+    online_presence_score: int  # 1-10
     research_priority: str  # "high", "medium", "low", "skip"
     reasoning: str  # Brief explanation for the score
     error: Optional[str] = None
@@ -662,28 +662,18 @@ class Stage1Result:
         return self.research_priority == "high"
 
 
-def _build_log_entry(
+def _build_tavily_log_entry(
     result: Stage1Result,
     company_description: Optional[str] = None,
     homepage_url: Optional[str] = None,
 ) -> dict:
     """
-    Build a JSON-serializable log entry from a Stage1Result.
+    Build a JSONL entry for the Tavily log file.
     
-    Captures everything: website check, Tavily raw response,
-    GPT input/output, and metadata. One entry = one line in JSONL.
-    
-    Args:
-        result: The completed Stage1Result.
-        company_description: Crunchbase description (not stored in result).
-        homepage_url: Company URL (not stored in result).
-    
-    Returns:
-        Dictionary ready for json.dumps().
+    Contains: company metadata, website check, and full Tavily raw response.
     """
     ws = result.website_status
     sr = result.search_result
-    assess = result.assessment
     
     return {
         "company_id": result.company_id,
@@ -704,17 +694,27 @@ def _build_log_entry(
             "result_count": sr.result_count,
             "raw_response": sr.raw_response,
         },
-        "gpt": {
-            "user_prompt": assess.user_prompt,
-            "raw_response": assess.raw_gpt_response,
-            "parsed": {
-                "online_presence_score": assess.online_presence_score,
-                "research_priority": assess.research_priority,
-                "reasoning": assess.reasoning,
-            },
-            "error": assess.error,
-        },
-        "estimated_cost_usd": result.estimated_cost,
+    }
+
+
+def _build_gpt_log_entry(
+    result: Stage1Result,
+) -> dict:
+    """
+    Build a JSONL entry for the GPT log file.
+    
+    Contains only: company ID/name and GPT output (parsed result).
+    Input data (Tavily results, prompts) lives in the Tavily log file.
+    """
+    assess = result.assessment
+    
+    return {
+        "company_id": result.company_id,
+        "company_name": result.company_name,
+        "online_presence_score": assess.online_presence_score,
+        "research_priority": assess.research_priority,
+        "reasoning": assess.reasoning,
+        "error": assess.error,
     }
 
 
@@ -725,7 +725,8 @@ async def run_stage_1(
     company_description: Optional[str],
     tavily_api_key: Optional[str] = None,
     openai_api_key: Optional[str] = None,
-    log_file: Optional[IO] = None
+    tavily_log_file: Optional[IO] = None,
+    gpt_log_file: Optional[IO] = None
 ) -> Stage1Result:
     """
     Run the complete Stage 1 presence filter for a single company.
@@ -742,8 +743,8 @@ async def run_stage_1(
         company_description: Crunchbase description.
         tavily_api_key: Tavily API key.
         openai_api_key: OpenAI API key.
-        log_file: Optional open file handle for JSONL logging.
-            If provided, a full log entry is written after processing.
+        tavily_log_file: Optional file handle for Tavily JSONL log.
+        gpt_log_file: Optional file handle for GPT JSONL log.
     
     Returns:
         Stage1Result with all component results and research priority.
@@ -778,11 +779,16 @@ async def run_stage_1(
         research_priority=assessment.research_priority,
     )
     
-    # Write JSONL log entry if log file is provided
-    if log_file is not None:
-        entry = _build_log_entry(result, company_description, homepage_url)
-        log_file.write(json_module.dumps(entry) + "\n")
-        log_file.flush()  # Flush after each company for crash safety
+    # Write JSONL log entries (separate files for Tavily and GPT)
+    if tavily_log_file is not None:
+        entry = _build_tavily_log_entry(result, company_description, homepage_url)
+        tavily_log_file.write(json_module.dumps(entry) + "\n")
+        tavily_log_file.flush()
+    
+    if gpt_log_file is not None:
+        entry = _build_gpt_log_entry(result)
+        gpt_log_file.write(json_module.dumps(entry) + "\n")
+        gpt_log_file.flush()
     
     return result
 
@@ -794,10 +800,11 @@ def run_stage_1_sync(
     company_description: Optional[str],
     tavily_api_key: Optional[str] = None,
     openai_api_key: Optional[str] = None,
-    log_file: Optional[IO] = None
+    tavily_log_file: Optional[IO] = None,
+    gpt_log_file: Optional[IO] = None
 ) -> Stage1Result:
     """Synchronous wrapper for run_stage_1."""
     return asyncio.run(run_stage_1(
         company_id, company_name, homepage_url, company_description,
-        tavily_api_key, openai_api_key, log_file
+        tavily_api_key, openai_api_key, tavily_log_file, gpt_log_file
     ))

@@ -25,7 +25,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.config import STAGE1_OUTPUT_DIR
+from src.config import STAGE1_OUTPUT_DIR, STAGE1_TAVILY_DIR, STAGE1_GPT_DIR
 from src.stage_1_filter import run_stage_1
 
 # Paths
@@ -39,6 +39,17 @@ def load_random_companies(n: int = 50) -> list[dict]:
         reader = csv.DictReader(f)
         rows = list(reader)
     return random.sample(rows, n)
+
+
+def load_companies_by_ids(company_ids: list[int]) -> list[dict]:
+    """Load specific companies by their rcid from the Crunchbase dataset."""
+    id_set = set(str(cid) for cid in company_ids)
+    with open(DATA_FILE, 'r') as f:
+        reader = csv.DictReader(f)
+        matches = [row for row in reader if row.get('rcid', '') in id_set]
+    # Preserve the original order
+    id_to_row = {row['rcid']: row for row in matches}
+    return [id_to_row[str(cid)] for cid in company_ids if str(cid) in id_to_row]
 
 
 async def main():
@@ -56,33 +67,47 @@ async def main():
         print("ERROR: Missing API keys. Cannot proceed.")
         return
     
-    # Load companies
-    companies = load_random_companies(50)
-    print(f"\nLoaded {len(companies)} random companies.")
-    print(f"Estimated cost: ~50 x $0.021 = $1.05 (Tavily advanced + GPT-4o-mini)")
+    # Load companies — reuse from a previous run if JSONL path provided, else random
+    REUSE_RUN = STAGE1_GPT_DIR / "gpt_20260207_150002.jsonl"  # Set to None for random
+    
+    if REUSE_RUN and REUSE_RUN.exists():
+        import json as json_mod
+        with open(REUSE_RUN) as f:
+            prev_ids = [json_mod.loads(line)['company_id'] for line in f]
+        companies = load_companies_by_ids(prev_ids)
+        N = len(companies)
+        print(f"\nReusing {N} companies from previous run: {REUSE_RUN.name}")
+    else:
+        N = 100
+        companies = load_random_companies(N)
+        print(f"\nLoaded {N} random companies.")
+    
+    print(f"Estimated cost: ~{N} x $0.021 = ${N * 0.021:.2f} (Tavily advanced + GPT-4o-mini)")
     
     # Output paths
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    jsonl_path = STAGE1_OUTPUT_DIR / f"stage1_run_{timestamp}.jsonl"
+    tavily_log_path = STAGE1_TAVILY_DIR / f"tavily_{timestamp}.jsonl"
+    gpt_log_path = STAGE1_GPT_DIR / f"gpt_{timestamp}.jsonl"
     csv_path = STAGE1_OUTPUT_DIR / f"stage1_run_{timestamp}.csv"
     
-    print(f"\nLogs:    {jsonl_path}")
-    print(f"Summary: {csv_path}")
+    print(f"\nTavily log: {tavily_log_path}")
+    print(f"GPT log:    {gpt_log_path}")
+    print(f"Summary:    {csv_path}")
     
     input("\nPress Enter to start (or Ctrl+C to cancel)...")
     
     start_time = time.time()
     
-    # Open JSONL log file and run pipeline
+    # Open log files and run pipeline
     results = []
-    with open(jsonl_path, 'w') as log_file:
+    with open(tavily_log_path, 'w') as tavily_log, open(gpt_log_path, 'w') as gpt_log:
         for i, company in enumerate(companies, 1):
             name = company['name']
             homepage = company.get('homepage_url', '')
             desc = company.get('short_description', '')
             rcid = company.get('rcid', i)
             
-            print(f"\n[{i}/50] {name}...", end=" ", flush=True)
+            print(f"\n[{i}/{N}] {name}...", end=" ", flush=True)
             
             try:
                 result = await run_stage_1(
@@ -92,7 +117,8 @@ async def main():
                     company_description=desc or None,
                     tavily_api_key=tavily_key,
                     openai_api_key=openai_key,
-                    log_file=log_file
+                    tavily_log_file=tavily_log,
+                    gpt_log_file=gpt_log
                 )
                 
                 priority = result.research_priority
@@ -189,8 +215,9 @@ async def main():
         writer.writeheader()
         writer.writerows(results)
     
-    print(f"\nFull logs: {jsonl_path}")
-    print(f"Summary CSV: {csv_path}")
+    print(f"\nTavily log: {tavily_log_path}")
+    print(f"GPT log:    {gpt_log_path}")
+    print(f"Summary:    {csv_path}")
     
     # Show high priority companies
     high = [r for r in results if r['priority'] == 'high']
