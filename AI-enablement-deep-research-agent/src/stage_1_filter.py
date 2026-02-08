@@ -822,16 +822,16 @@ async def run_stage_1(
     Returns:
         Stage1Result with all component results and research priority score.
     """
-    # Step 1: Check website
-    website_status = await check_website(homepage_url or "", client=http_client)
-    
-    # Step 2: Search for general company information (name-only query)
-    search_result = await search_tavily(
-        company_name, 
-        homepage_url,
-        company_description,
-        api_key=tavily_api_key,
-        client=tavily_client,
+    # Steps 1 & 2: Website check and Tavily search are independent — run in parallel
+    website_status, search_result = await asyncio.gather(
+        check_website(homepage_url or "", client=http_client),
+        search_tavily(
+            company_name,
+            homepage_url,
+            company_description,
+            api_key=tavily_api_key,
+            client=tavily_client,
+        ),
     )
     
     # Step 3: Analyze and assign research priority (GPT compares search vs Crunchbase profile)

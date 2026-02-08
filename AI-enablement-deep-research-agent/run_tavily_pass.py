@@ -127,14 +127,16 @@ async def process_company(
     name = company["name"]
     homepage = company.get("homepage_url") or ""
 
-    # Website check + Tavily search (sequential for now — Commit 7 parallelizes)
-    website_status = await check_website(homepage, client=http_client)
-    search_result = await search_tavily(
-        company_name=name,
-        homepage_url=homepage or None,
-        company_description=company.get("short_description") or None,
-        api_key=tavily_api_key,
-        client=tavily_client,
+    # Website check and Tavily search are independent — run in parallel
+    website_status, search_result = await asyncio.gather(
+        check_website(homepage, client=http_client),
+        search_tavily(
+            company_name=name,
+            homepage_url=homepage or None,
+            company_description=company.get("short_description") or None,
+            api_key=tavily_api_key,
+            client=tavily_client,
+        ),
     )
 
     return build_tavily_record(company, website_status, search_result)
