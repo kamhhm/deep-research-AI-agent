@@ -14,7 +14,7 @@ from enum import Enum
 from typing import Optional
 import httpx
 
-from .config import PROCESSING, COSTS, PROMPTS_DIR, APIKeys
+from ..config import PROCESSING, COSTS, PROMPTS_DIR, APIKeys
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -385,7 +385,7 @@ class PerplexityClient:
         if error:
             return PerplexityResponse(content="", error=error)
         
-        async with httpx.AsyncClient(timeout=PROCESSING.api_timeout) as client:
+        async with httpx.AsyncClient(timeout=PROCESSING.openai_timeout) as client:
             try:
                 response = await client.post(
                     self.BASE_URL,

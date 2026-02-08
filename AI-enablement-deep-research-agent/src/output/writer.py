@@ -15,8 +15,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Iterator
 
-from .config import OUTPUT_DIR
-from .perplexity_client import GenAIFinding, ResearchResult
+from ..config import OUTPUT_DIR
+from ..stage_2.perplexity_client import GenAIFinding, ResearchResult
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -295,7 +295,7 @@ def create_sample_csv(output_path: Optional[Path] = None) -> Path:
     Returns:
         Path to the written CSV file.
     """
-    from .perplexity_client import GenAIFinding, ResearchResult
+    from ..stage_2.perplexity_client import GenAIFinding, ResearchResult
     
     # Sample data
     samples = [

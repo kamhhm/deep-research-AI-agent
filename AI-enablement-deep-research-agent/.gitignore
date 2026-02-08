@@ -44,8 +44,10 @@ build/
 # ─────────────────────────────────────────────────────────────────────────────
 # Output files (keep .gitkeep, ignore actual outputs)
 # ─────────────────────────────────────────────────────────────────────────────
-outputs/*.csv
-outputs/*.json
+outputs/**/*.csv
+outputs/**/*.json
+outputs/**/*.jsonl
+!outputs/.gitkeep
 logs/*.log
 checkpoints/*.json
 

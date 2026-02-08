@@ -4,7 +4,7 @@ Test Stage 1 pipeline on 50 random companies from the Crunchbase dataset.
 Runs the full pipeline:
 1. Website health check
 2. Tavily search (advanced, 5 results)
-3. GPT-4o-mini classification
+3. GPT-5-nano classification
 
 Outputs:
 - outputs/stage1/stage1_run_<timestamp>.jsonl  (full logs per company)
@@ -26,7 +26,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.config import STAGE1_OUTPUT_DIR, STAGE1_TAVILY_DIR, STAGE1_GPT_DIR
-from src.stage_1_filter import run_stage_1
+from src.stage_1 import run_stage_1
 
 # Paths
 BASE_DIR = Path(__file__).parent
@@ -82,7 +82,7 @@ async def main():
         companies = load_random_companies(N)
         print(f"\nLoaded {N} random companies.")
     
-    print(f"Estimated cost: ~{N} x $0.021 = ${N * 0.021:.2f} (Tavily advanced + GPT-4o-mini)")
+    print(f"Estimated cost: ~{N} x $0.020 = ${N * 0.020:.2f} (Tavily advanced + GPT-5-nano)")
     
     # Output paths
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -105,6 +105,7 @@ async def main():
             name = company['name']
             homepage = company.get('homepage_url', '')
             desc = company.get('short_description', '')
+            long_desc = company.get('description', '')
             rcid = company.get('rcid', i)
             
             print(f"\n[{i}/{N}] {name}...", end=" ", flush=True)
@@ -115,31 +116,25 @@ async def main():
                     company_name=name,
                     homepage_url=homepage or None,
                     company_description=desc or None,
+                    long_description=long_desc or None,
                     tavily_api_key=tavily_key,
                     openai_api_key=openai_key,
                     tavily_log_file=tavily_log,
                     gpt_log_file=gpt_log
                 )
                 
-                priority = result.research_priority
-                score = result.presence_score
+                priority_score = result.research_priority_score
+                presence = result.presence_score
                 reasoning = result.assessment.reasoning if result.assessment else ""
                 
-                priority_display = {
-                    "high": f"HIGH ({score})",
-                    "medium": f"MEDIUM ({score})",
-                    "low": f"LOW ({score})",
-                    "skip": f"SKIP ({score})",
-                }.get(priority, priority)
-                
-                print(f"{priority_display} — {reasoning[:60]}")
+                print(f"P{priority_score} (presence={presence}) — {reasoning[:60]}")
                 
                 results.append({
                     'name': name,
                     'homepage': homepage,
                     'description': desc[:80],
-                    'priority': priority,
-                    'score': score,
+                    'priority_score': priority_score,
+                    'presence_score': presence,
                     'reasoning': reasoning,
                     'website_alive': result.website_status.is_alive if result.website_status else False,
                     'search_results': result.search_result.result_count if result.search_result else 0,
@@ -152,8 +147,8 @@ async def main():
                     'name': name,
                     'homepage': homepage,
                     'description': desc[:80],
-                    'priority': 'error',
-                    'score': 0,
+                    'priority_score': -1,
+                    'presence_score': 0,
                     'reasoning': str(e),
                     'website_alive': False,
                     'search_results': 0,
@@ -170,32 +165,40 @@ async def main():
     print(f"  STAGE 1 TEST RESULTS — {len(results)} companies in {elapsed:.1f}s")
     print("="*80)
     
-    # Distribution
+    # Research Priority Score distribution (0-5)
     from collections import Counter
-    priority_counts = Counter(r['priority'] for r in results)
+    valid_results = [r for r in results if r['priority_score'] >= 0]
+    priority_counts = Counter(r['priority_score'] for r in valid_results)
+    error_count = sum(1 for r in results if r['priority_score'] < 0)
     
-    print(f"\nPriority Distribution:")
-    for priority in ['high', 'medium', 'low', 'skip', 'error']:
-        count = priority_counts.get(priority, 0)
+    labels = {
+        5: "5 (definitely yields)",
+        4: "4 (potentially yields)",
+        3: "3 (worth a shot)",
+        2: "2 (not worth it)",
+        1: "1 (mostly unrelated)",
+        0: "0 (not researchable)",
+    }
+    
+    print(f"\nResearch Priority Score Distribution (0-5):")
+    for score in [5, 4, 3, 2, 1, 0]:
+        count = priority_counts.get(score, 0)
         pct = count / len(results) * 100
         bar = '█' * int(pct / 2)
-        print(f"  {priority:8} {count:3} ({pct:5.1f}%) {bar}")
+        print(f"  {labels[score]:25} {count:3} ({pct:5.1f}%) {bar}")
+    if error_count:
+        pct = error_count / len(results) * 100
+        print(f"  {'error':25} {error_count:3} ({pct:5.1f}%)")
     
-    # Score distribution
-    scores = [r['score'] for r in results if r['priority'] != 'error']
-    if scores:
-        print(f"\nPresence Scores:")
-        print(f"  Min: {min(scores)}, Max: {max(scores)}, Avg: {sum(scores)/len(scores):.0f}")
-        
-        # Histogram to check for clustering
-        print(f"\n  Score histogram:")
-        buckets = {}
-        for s in scores:
-            bucket = (s // 10) * 10
-            buckets[bucket] = buckets.get(bucket, 0) + 1
-        for bucket in sorted(buckets.keys()):
-            count = buckets[bucket]
-            print(f"    {bucket:3}-{bucket+9:3}: {'█' * count} ({count})")
+    # Deep research candidates (score >= 3)
+    deep_research = sum(1 for r in valid_results if r['priority_score'] >= 3)
+    print(f"\n  Deep research candidates (score >= 3): {deep_research}/{len(results)} ({deep_research/len(results)*100:.0f}%)")
+    
+    # Presence score distribution
+    presence_scores = [r['presence_score'] for r in valid_results]
+    if presence_scores:
+        print(f"\nPresence Scores (1-10):")
+        print(f"  Min: {min(presence_scores)}, Max: {max(presence_scores)}, Avg: {sum(presence_scores)/len(presence_scores):.1f}")
     
     # Website status
     alive = sum(1 for r in results if r['website_alive'])
@@ -209,7 +212,7 @@ async def main():
     # Save summary CSV
     with open(csv_path, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=[
-            'name', 'homepage', 'description', 'priority', 'score',
+            'name', 'homepage', 'description', 'priority_score', 'presence_score',
             'reasoning', 'website_alive', 'search_results', 'error'
         ])
         writer.writeheader()
@@ -219,19 +222,20 @@ async def main():
     print(f"GPT log:    {gpt_log_path}")
     print(f"Summary:    {csv_path}")
     
-    # Show high priority companies
-    high = [r for r in results if r['priority'] == 'high']
-    if high:
-        print(f"\n--- HIGH PRIORITY ({len(high)}) ---")
-        for r in high:
-            print(f"  {r['name']} (score={r['score']}): {r['reasoning'][:70]}")
+    # Show deep research candidates (score >= 3)
+    candidates = [r for r in valid_results if r['priority_score'] >= 3]
+    if candidates:
+        candidates.sort(key=lambda r: r['priority_score'], reverse=True)
+        print(f"\n--- DEEP RESEARCH CANDIDATES (score >= 3): {len(candidates)} ---")
+        for r in candidates:
+            print(f"  P{r['priority_score']} | {r['name']} (presence={r['presence_score']}): {r['reasoning'][:65]}")
     
-    # Show skipped companies
-    skipped = [r for r in results if r['priority'] == 'skip']
-    if skipped:
-        print(f"\n--- SKIPPED ({len(skipped)}) ---")
-        for r in skipped:
-            print(f"  {r['name']} (score={r['score']}): {r['reasoning'][:70]}")
+    # Show not researchable (score 0)
+    not_researchable = [r for r in valid_results if r['priority_score'] == 0]
+    if not_researchable:
+        print(f"\n--- NOT RESEARCHABLE (score 0): {len(not_researchable)} ---")
+        for r in not_researchable:
+            print(f"  {r['name']} (presence={r['presence_score']}): {r['reasoning'][:70]}")
 
 
 if __name__ == "__main__":
