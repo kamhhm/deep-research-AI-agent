@@ -41,6 +41,7 @@ from src.config import (
     PROCESSING, STAGE1_OUTPUT_DIR,
     APIKeys, DATA_DIR,
 )
+from src.jsonl_writer import AsyncJSONLWriter
 from src.rate_limiter import AsyncRateLimiter
 from src.stage_1_filter import (
     check_website,
@@ -196,64 +197,57 @@ async def main():
     start_time = time.time()
     processed = 0
     errors = 0
-    write_lock = asyncio.Lock()
 
-    # Open JSONL in append mode for the duration of the run
-    jsonl_file = open(output_path, "a")
+    async with AsyncJSONLWriter(output_path) as writer:
 
-    async def process_one(company: dict, idx: int) -> None:
-        nonlocal processed, errors
-        name = company["name"]
+        async def process_one(company: dict, idx: int) -> None:
+            nonlocal processed, errors
+            name = company["name"]
 
-        async with semaphore:
-            # Acquire rate limit slot before the Tavily call
-            await tavily_limiter.acquire()
+            async with semaphore:
+                # Acquire rate limit slot before the Tavily call
+                await tavily_limiter.acquire()
 
-            try:
-                record = await process_company(
-                    company, keys.tavily, http_client, tavily_client,
-                )
+                try:
+                    record = await process_company(
+                        company, keys.tavily, http_client, tavily_client,
+                    )
+                    await writer.write(record)
+                    processed += 1
 
-                # Write under lock for concurrency safety
-                async with write_lock:
-                    jsonl_file.write(json.dumps(record) + "\n")
-                    jsonl_file.flush()
-                processed += 1
+                    result_count = record["tavily"]["result_count"]
+                    alive = "alive" if record["website_check"]["is_alive"] else "dead"
+                    print(f"  [{idx}/{len(remaining)}] {name}: {alive}, {result_count} results")
 
-                result_count = record["tavily"]["result_count"]
-                alive = "alive" if record["website_check"]["is_alive"] else "dead"
-                print(f"  [{idx}/{len(remaining)}] {name}: {alive}, {result_count} results")
+                except Exception as e:
+                    errors += 1
+                    print(f"  [{idx}/{len(remaining)}] {name}: ERROR — {e}")
 
-            except Exception as e:
-                errors += 1
-                print(f"  [{idx}/{len(remaining)}] {name}: ERROR — {e}")
+        try:
+            # Process in batches for memory safety and progress reporting
+            batch_size = 200
+            for batch_start in range(0, len(remaining), batch_size):
+                batch = remaining[batch_start:batch_start + batch_size]
+                tasks = [
+                    process_one(company, batch_start + j + 1)
+                    for j, company in enumerate(batch)
+                ]
+                await asyncio.gather(*tasks)
 
-    try:
-        # Process in batches for memory safety and progress reporting
-        batch_size = 200
-        for batch_start in range(0, len(remaining), batch_size):
-            batch = remaining[batch_start:batch_start + batch_size]
-            tasks = [
-                process_one(company, batch_start + j + 1)
-                for j, company in enumerate(batch)
-            ]
-            await asyncio.gather(*tasks)
+                # Progress report after each batch
+                elapsed = time.time() - start_time
+                done = batch_start + len(batch)
+                rate = processed / elapsed if elapsed > 0 else 0
+                eta = (len(remaining) - done) / rate if rate > 0 else 0
+                print(f"\n  --- Progress: {done}/{len(remaining)} | "
+                      f"{rate:.1f} companies/sec | "
+                      f"ETA: {eta/60:.0f}min | "
+                      f"Errors: {errors} | "
+                      f"Rate limiter: {tavily_limiter.stats} ---\n")
 
-            # Progress report after each batch
-            elapsed = time.time() - start_time
-            done = batch_start + len(batch)
-            rate = processed / elapsed if elapsed > 0 else 0
-            eta = (len(remaining) - done) / rate if rate > 0 else 0
-            print(f"\n  --- Progress: {done}/{len(remaining)} | "
-                  f"{rate:.1f} companies/sec | "
-                  f"ETA: {eta/60:.0f}min | "
-                  f"Errors: {errors} | "
-                  f"Rate limiter: {tavily_limiter.stats} ---\n")
-
-    finally:
-        jsonl_file.close()
-        await http_client.aclose()
-        await tavily_client.aclose()
+        finally:
+            await http_client.aclose()
+            await tavily_client.aclose()
 
     elapsed = time.time() - start_time
 
