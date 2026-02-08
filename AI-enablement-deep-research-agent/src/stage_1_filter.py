@@ -67,7 +67,8 @@ class WebsiteStatus:
 async def check_website(
     url: str,
     timeout: float = PROCESSING.http_timeout,
-    follow_redirects: bool = True
+    follow_redirects: bool = True,
+    client: Optional[httpx.AsyncClient] = None,
 ) -> WebsiteStatus:
     """
     Check if a website is alive using a HEAD request.
@@ -81,6 +82,7 @@ async def check_website(
         url: The URL to check.
         timeout: Request timeout in seconds.
         follow_redirects: Whether to follow redirects.
+        client: Optional shared httpx.AsyncClient for connection pooling.
     
     Returns:
         WebsiteStatus with check results.
@@ -97,25 +99,17 @@ async def check_website(
     if not url.startswith(("http://", "https://")):
         url = f"https://{url}"
     
-    async with httpx.AsyncClient(
-        timeout=timeout,
-        follow_redirects=follow_redirects,
-        # Common headers to avoid bot detection
-        headers={
-            "User-Agent": "Mozilla/5.0 (compatible; ResearchBot/1.0; +https://ubc.ca)",
-            "Accept": "text/html,application/xhtml+xml",
-        }
-    ) as client:
+    async def _do_check(c: httpx.AsyncClient) -> WebsiteStatus:
         try:
             # Try HEAD first (faster)
             start_time = asyncio.get_event_loop().time()
-            response = await client.head(url)
+            response = await c.head(url)
             elapsed_ms = (asyncio.get_event_loop().time() - start_time) * 1000
             
             # Some servers don't support HEAD, fall back to GET
             if response.status_code == 405:  # Method Not Allowed
                 start_time = asyncio.get_event_loop().time()
-                response = await client.get(url)
+                response = await c.get(url)
                 elapsed_ms = (asyncio.get_event_loop().time() - start_time) * 1000
             
             # Consider 2xx and 3xx as "alive"
@@ -164,6 +158,20 @@ async def check_website(
                 is_alive=False,
                 error=f"{error_type}: {str(e)[:100]}"
             )
+    
+    if client is not None:
+        return await _do_check(client)
+    
+    # Fallback: create a one-off client (backward compat for simple scripts)
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        follow_redirects=follow_redirects,
+        headers={
+            "User-Agent": "Mozilla/5.0 (compatible; ResearchBot/1.0; +https://ubc.ca)",
+            "Accept": "text/html,application/xhtml+xml",
+        }
+    ) as new_client:
+        return await _do_check(new_client)
 
 
 async def check_websites_batch(
@@ -277,13 +285,14 @@ async def search_tavily(
     homepage_url: Optional[str] = None,
     company_description: Optional[str] = None,
     api_key: Optional[str] = None,
-    max_results: int = 5
+    max_results: int = 5,
+    client: Optional[httpx.AsyncClient] = None,
 ) -> TavilySearchResult:
     """
     Search Tavily for general company information.
     
     This is a controlled, single search per company to ensure
-    predictable costs (~$0.01 per search).
+    predictable costs (~$0.02 per search with advanced depth).
     
     Args:
         company_name: Name of the company to search for.
@@ -291,6 +300,7 @@ async def search_tavily(
         company_description: Crunchbase description (for disambiguation).
         api_key: Tavily API key. Uses credentials folder or env var if not provided.
         max_results: Maximum number of results to return.
+        client: Optional shared httpx.AsyncClient for connection pooling.
     
     Returns:
         TavilySearchResult with general company information snippets.
@@ -310,9 +320,9 @@ async def search_tavily(
     
     query = build_search_query(company_name, homepage_url, company_description)
     
-    async with httpx.AsyncClient(timeout=PROCESSING.tavily_timeout) as client:
+    async def _do_search(c: httpx.AsyncClient) -> TavilySearchResult:
         try:
-            response = await client.post(
+            response = await c.post(
                 "https://api.tavily.com/search",
                 json={
                     "api_key": api_key,
@@ -362,6 +372,13 @@ async def search_tavily(
                 result_count=0,
                 error=f"{type(e).__name__}: {str(e)[:100]}"
             )
+    
+    if client is not None:
+        return await _do_search(client)
+    
+    # Fallback: create a one-off client (backward compat for simple scripts)
+    async with httpx.AsyncClient(timeout=PROCESSING.tavily_timeout) as new_client:
+        return await _do_search(new_client)
 
 
 async def search_tavily_batch(
@@ -532,6 +549,7 @@ async def classify_company(
     api_key: Optional[str] = None,
     homepage_url: Optional[str] = None,
     long_description: Optional[str] = None,
+    client: Optional[httpx.AsyncClient] = None,
 ) -> PresenceAssessment:
     """
     Use GPT-5-nano to assess a company's profile and predict research priority.
@@ -544,12 +562,11 @@ async def classify_company(
         api_key: OpenAI API key. Uses env var if not provided.
         homepage_url: Company homepage URL from Crunchbase (for profile context).
         long_description: Crunchbase long description (if available).
+        client: Optional shared httpx.AsyncClient for connection pooling.
     
     Returns:
         PresenceAssessment with online_presence_score and research_priority_score.
     """
-    import json
-    
     if not api_key:
         keys = APIKeys()
         api_key = keys.openai
@@ -568,9 +585,9 @@ async def classify_company(
         homepage_url=homepage_url, long_description=long_description,
     )
     
-    async with httpx.AsyncClient(timeout=PROCESSING.openai_timeout) as client:
+    async def _do_classify(c: httpx.AsyncClient) -> PresenceAssessment:
         try:
-            response = await client.post(
+            response = await c.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {api_key}",
@@ -590,7 +607,7 @@ async def classify_company(
             
             # Parse the response
             content = data["choices"][0]["message"]["content"]
-            result = json.loads(content)
+            result = json_module.loads(content)
             
             return PresenceAssessment(
                 company_name=company_name,
@@ -610,7 +627,7 @@ async def classify_company(
                 error=f"HTTP {e.response.status_code}: {e.response.text[:100]}",
                 user_prompt=user_prompt,
             )
-        except json.JSONDecodeError as e:
+        except json_module.JSONDecodeError as e:
             return PresenceAssessment(
                 company_name=company_name,
                 online_presence_score=0,
@@ -628,6 +645,13 @@ async def classify_company(
                 error=f"{type(e).__name__}: {str(e)[:100]}",
                 user_prompt=user_prompt,
             )
+    
+    if client is not None:
+        return await _do_classify(client)
+    
+    # Fallback: create a one-off client (backward compat for simple scripts)
+    async with httpx.AsyncClient(timeout=PROCESSING.openai_timeout) as new_client:
+        return await _do_classify(new_client)
 
 
 def classify_company_sync(
@@ -639,10 +663,11 @@ def classify_company_sync(
     homepage_url: Optional[str] = None,
     long_description: Optional[str] = None,
 ) -> PresenceAssessment:
-    """Synchronous wrapper for classify_company."""
+    """Synchronous wrapper for classify_company (creates its own client)."""
     return asyncio.run(classify_company(
         company_name, company_description, website_status, search_result, api_key,
         homepage_url=homepage_url, long_description=long_description,
+        # No shared client — sync wrappers are for simple scripts
     ))
 
 
@@ -748,7 +773,10 @@ async def run_stage_1(
     tavily_api_key: Optional[str] = None,
     openai_api_key: Optional[str] = None,
     tavily_log_file: Optional[IO] = None,
-    gpt_log_file: Optional[IO] = None
+    gpt_log_file: Optional[IO] = None,
+    http_client: Optional[httpx.AsyncClient] = None,
+    tavily_client: Optional[httpx.AsyncClient] = None,
+    openai_client: Optional[httpx.AsyncClient] = None,
 ) -> Stage1Result:
     """
     Run the complete Stage 1 presence filter for a single company.
@@ -768,19 +796,23 @@ async def run_stage_1(
         openai_api_key: OpenAI API key.
         tavily_log_file: Optional file handle for Tavily JSONL log.
         gpt_log_file: Optional file handle for GPT JSONL log.
+        http_client: Optional shared httpx client for website checks.
+        tavily_client: Optional shared httpx client for Tavily API.
+        openai_client: Optional shared httpx client for OpenAI API.
     
     Returns:
         Stage1Result with all component results and research priority score.
     """
     # Step 1: Check website
-    website_status = await check_website(homepage_url or "")
+    website_status = await check_website(homepage_url or "", client=http_client)
     
     # Step 2: Search for general company information (name-only query)
     search_result = await search_tavily(
         company_name, 
         homepage_url,
         company_description,
-        api_key=tavily_api_key
+        api_key=tavily_api_key,
+        client=tavily_client,
     )
     
     # Step 3: Analyze and assign research priority (GPT compares search vs Crunchbase profile)
@@ -792,6 +824,7 @@ async def run_stage_1(
         api_key=openai_api_key,
         homepage_url=homepage_url,
         long_description=long_description,
+        client=openai_client,
     )
     
     result = Stage1Result(
