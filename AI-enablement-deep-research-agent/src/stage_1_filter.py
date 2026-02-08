@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 import httpx
 
 from .config import PROCESSING, APIKeys, PROMPTS_DIR
+from .retry import async_retry
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -321,41 +322,50 @@ async def search_tavily(
     query = build_search_query(company_name, homepage_url, company_description)
     
     async def _do_search(c: httpx.AsyncClient) -> TavilySearchResult:
+        """Raw search call — raises on retryable errors so retry wrapper can handle them."""
+        response = await c.post(
+            "https://api.tavily.com/search",
+            json={
+                "api_key": api_key,
+                "query": query,
+                "search_depth": "advanced",  # Highest relevance, returns reranked chunks
+                "max_results": max_results,
+                "chunks_per_source": 3,  # Multiple snippets per source for richer context
+                "include_answer": False,  # GPT does its own assessment
+                "include_raw_content": False,  # Not needed for Stage 1 filtering
+            }
+        )
+        response.raise_for_status()
+        data = response.json()
+        
+        # Parse results into snippets
+        snippets = []
+        for result in data.get("results", []):
+            snippet = SearchSnippet(
+                title=result.get("title", ""),
+                url=result.get("url", ""),
+                content=result.get("content", ""),
+                score=result.get("score", 0.0),
+            )
+            snippets.append(snippet)
+        
+        return TavilySearchResult(
+            company_name=company_name,
+            query=query,
+            snippets=snippets,
+            result_count=len(snippets),
+            raw_response=data,
+        )
+    
+    async def _search_with_retry(c: httpx.AsyncClient) -> TavilySearchResult:
+        """Wrap the search with retry logic, catch permanent failures."""
         try:
-            response = await c.post(
-                "https://api.tavily.com/search",
-                json={
-                    "api_key": api_key,
-                    "query": query,
-                    "search_depth": "advanced",  # Highest relevance, returns reranked chunks
-                    "max_results": max_results,
-                    "chunks_per_source": 3,  # Multiple snippets per source for richer context
-                    "include_answer": False,  # GPT does its own assessment
-                    "include_raw_content": False,  # Not needed for Stage 1 filtering
-                }
+            return await async_retry(
+                _do_search, c,
+                max_retries=PROCESSING.max_retries,
+                delay_base=PROCESSING.retry_delay_base,
+                operation_name=f"tavily_search({company_name})",
             )
-            response.raise_for_status()
-            data = response.json()
-            
-            # Parse results into snippets
-            snippets = []
-            for result in data.get("results", []):
-                snippet = SearchSnippet(
-                    title=result.get("title", ""),
-                    url=result.get("url", ""),
-                    content=result.get("content", ""),
-                    score=result.get("score", 0.0),
-                )
-                snippets.append(snippet)
-            
-            return TavilySearchResult(
-                company_name=company_name,
-                query=query,
-                snippets=snippets,
-                result_count=len(snippets),
-                raw_response=data,
-            )
-            
         except httpx.HTTPStatusError as e:
             return TavilySearchResult(
                 company_name=company_name,
@@ -374,11 +384,11 @@ async def search_tavily(
             )
     
     if client is not None:
-        return await _do_search(client)
+        return await _search_with_retry(client)
     
     # Fallback: create a one-off client (backward compat for simple scripts)
     async with httpx.AsyncClient(timeout=PROCESSING.tavily_timeout) as new_client:
-        return await _do_search(new_client)
+        return await _search_with_retry(new_client)
 
 
 async def search_tavily_batch(
@@ -586,38 +596,47 @@ async def classify_company(
     )
     
     async def _do_classify(c: httpx.AsyncClient) -> PresenceAssessment:
+        """Raw classify call — raises on retryable errors so retry wrapper can handle them."""
+        response = await c.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "gpt-5-nano",
+                "messages": [
+                    {"role": "system", "content": CLASSIFIER_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "response_format": {"type": "json_object"},
+            }
+        )
+        response.raise_for_status()
+        data = response.json()
+        
+        # Parse the response
+        content = data["choices"][0]["message"]["content"]
+        result = json_module.loads(content)
+        
+        return PresenceAssessment(
+            company_name=company_name,
+            online_presence_score=int(result.get("online_presence_score", 0)),
+            research_priority_score=int(result.get("research_priority_score", 0)),
+            reasoning=result.get("reasoning", ""),
+            user_prompt=user_prompt,
+            raw_gpt_response=data,
+        )
+    
+    async def _classify_with_retry(c: httpx.AsyncClient) -> PresenceAssessment:
+        """Wrap the classify call with retry logic, catch permanent failures."""
         try:
-            response = await c.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "gpt-5-nano",
-                    "messages": [
-                        {"role": "system", "content": CLASSIFIER_SYSTEM_PROMPT},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "response_format": {"type": "json_object"},
-                }
+            return await async_retry(
+                _do_classify, c,
+                max_retries=PROCESSING.max_retries,
+                delay_base=PROCESSING.retry_delay_base,
+                operation_name=f"gpt_classify({company_name})",
             )
-            response.raise_for_status()
-            data = response.json()
-            
-            # Parse the response
-            content = data["choices"][0]["message"]["content"]
-            result = json_module.loads(content)
-            
-            return PresenceAssessment(
-                company_name=company_name,
-                online_presence_score=int(result.get("online_presence_score", 0)),
-                research_priority_score=int(result.get("research_priority_score", 0)),
-                reasoning=result.get("reasoning", ""),
-                user_prompt=user_prompt,
-                raw_gpt_response=data,
-            )
-            
         except httpx.HTTPStatusError as e:
             return PresenceAssessment(
                 company_name=company_name,
@@ -647,11 +666,11 @@ async def classify_company(
             )
     
     if client is not None:
-        return await _do_classify(client)
+        return await _classify_with_retry(client)
     
     # Fallback: create a one-off client (backward compat for simple scripts)
     async with httpx.AsyncClient(timeout=PROCESSING.openai_timeout) as new_client:
-        return await _do_classify(new_client)
+        return await _classify_with_retry(new_client)
 
 
 def classify_company_sync(
