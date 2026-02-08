@@ -42,6 +42,7 @@ from src.config import (
     PROCESSING, STAGE1_OUTPUT_DIR, STAGE1_GPT_DIR,
     APIKeys,
 )
+from src.rate_limiter import AsyncRateLimiter
 from src.stage_1_filter import (
     WebsiteStatus,
     TavilySearchResult,
@@ -205,69 +206,93 @@ async def main():
     import httpx
     openai_client = httpx.AsyncClient(timeout=PROCESSING.openai_timeout)
 
+    # Rate limiter + concurrency semaphore
+    openai_limiter = AsyncRateLimiter(rpm=PROCESSING.openai_rpm, name="openai")
+    semaphore = asyncio.Semaphore(PROCESSING.max_concurrent_requests)
+
     start_time = time.time()
     processed = 0
     errors = 0
+    write_lock = asyncio.Lock()
 
     # Score distribution tracking
     score_dist = {i: 0 for i in range(6)}
 
+    jsonl_file = open(output_path, "a")
+
+    async def classify_one(record: dict, idx: int) -> None:
+        nonlocal processed, errors
+        rcid = int(record["rcid"])
+        name = record["name"]
+
+        # Reconstruct data from Tavily JSONL
+        website_status = reconstruct_website_status(record)
+        search_result = reconstruct_tavily_result(record)
+
+        async with semaphore:
+            await openai_limiter.acquire()
+
+            try:
+                assessment = await classify_company(
+                    company_name=name,
+                    company_description=record.get("short_description"),
+                    website_status=website_status,
+                    search_result=search_result,
+                    api_key=keys.openai,
+                    homepage_url=record.get("homepage_url"),
+                    long_description=record.get("description"),
+                    client=openai_client,
+                )
+
+                gpt_record = build_gpt_record(rcid, name, assessment)
+
+                async with write_lock:
+                    jsonl_file.write(json.dumps(gpt_record) + "\n")
+                    jsonl_file.flush()
+                processed += 1
+
+                score = assessment.research_priority_score
+                if 0 <= score <= 5:
+                    score_dist[score] += 1
+                print(f"  [{idx}/{len(remaining)}] {name}: "
+                      f"P{score} (presence={assessment.online_presence_score}) "
+                      f"— {assessment.reasoning[:50]}")
+
+            except Exception as e:
+                errors += 1
+                error_record = {
+                    "rcid": rcid, "name": name,
+                    "online_presence_score": 0, "research_priority_score": 0,
+                    "reasoning": "", "error": f"{type(e).__name__}: {str(e)[:200]}",
+                }
+                async with write_lock:
+                    jsonl_file.write(json.dumps(error_record) + "\n")
+                    jsonl_file.flush()
+                print(f"  [{idx}/{len(remaining)}] {name}: ERROR — {e}")
+
     try:
-        with open(output_path, "a") as f:
-            for i, record in enumerate(remaining, 1):
-                rcid = int(record["rcid"])
-                name = record["name"]
-                print(f"[{i}/{len(remaining)}] {name}...", end=" ", flush=True)
+        # Process in batches for progress reporting
+        batch_size = 200
+        for batch_start in range(0, len(remaining), batch_size):
+            batch = remaining[batch_start:batch_start + batch_size]
+            tasks = [
+                classify_one(record, batch_start + j + 1)
+                for j, record in enumerate(batch)
+            ]
+            await asyncio.gather(*tasks)
 
-                # Reconstruct data from Tavily JSONL
-                website_status = reconstruct_website_status(record)
-                search_result = reconstruct_tavily_result(record)
-
-                try:
-                    assessment = await classify_company(
-                        company_name=name,
-                        company_description=record.get("short_description"),
-                        website_status=website_status,
-                        search_result=search_result,
-                        api_key=keys.openai,
-                        homepage_url=record.get("homepage_url"),
-                        long_description=record.get("description"),
-                        client=openai_client,
-                    )
-
-                    gpt_record = build_gpt_record(rcid, name, assessment)
-                    f.write(json.dumps(gpt_record) + "\n")
-                    f.flush()
-                    processed += 1
-
-                    score = assessment.research_priority_score
-                    if 0 <= score <= 5:
-                        score_dist[score] += 1
-                    print(f"P{score} (presence={assessment.online_presence_score}) "
-                          f"— {assessment.reasoning[:50]}")
-
-                except Exception as e:
-                    errors += 1
-                    # Write error record so we don't retry indefinitely
-                    error_record = {
-                        "rcid": rcid, "name": name,
-                        "online_presence_score": 0, "research_priority_score": 0,
-                        "reasoning": "", "error": f"{type(e).__name__}: {str(e)[:200]}",
-                    }
-                    f.write(json.dumps(error_record) + "\n")
-                    f.flush()
-                    print(f"ERROR: {e}")
-
-                # Progress report every 100
-                if i % 100 == 0:
-                    elapsed = time.time() - start_time
-                    rate = processed / elapsed if elapsed > 0 else 0
-                    eta = (len(remaining) - i) / rate if rate > 0 else 0
-                    print(f"\n  --- Progress: {i}/{len(remaining)} | "
-                          f"{rate:.1f}/sec | ETA: {eta/60:.0f}min | "
-                          f"Errors: {errors} ---\n")
+            # Progress report
+            elapsed = time.time() - start_time
+            done = batch_start + len(batch)
+            rate = processed / elapsed if elapsed > 0 else 0
+            eta = (len(remaining) - done) / rate if rate > 0 else 0
+            print(f"\n  --- Progress: {done}/{len(remaining)} | "
+                  f"{rate:.1f}/sec | ETA: {eta/60:.0f}min | "
+                  f"Errors: {errors} | "
+                  f"Rate limiter: {openai_limiter.stats} ---\n")
 
     finally:
+        jsonl_file.close()
         await openai_client.aclose()
 
     elapsed = time.time() - start_time
