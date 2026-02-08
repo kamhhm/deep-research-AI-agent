@@ -7,14 +7,14 @@ and predicts research priority for subsequent deep research stages.
 Components:
     1. Website health check (HEAD request)
     2. Tavily search for general company information
-    3. GPT-4o-mini analysis to predict research priority
+    3. GPT-5-nano analysis to predict research priority
 
-Cost: ~$0.011 per company ($0.01 Tavily + $0.001 GPT-4o-mini)
+Cost: ~$0.011 per company ($0.01 Tavily + $0.001 GPT-5-nano)
 """
 
 import asyncio
 import json as json_module
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import IO, Optional
 from urllib.parse import urlparse
@@ -310,17 +310,18 @@ async def search_tavily(
     
     query = build_search_query(company_name, homepage_url, company_description)
     
-    async with httpx.AsyncClient(timeout=PROCESSING.api_timeout) as client:
+    async with httpx.AsyncClient(timeout=PROCESSING.tavily_timeout) as client:
         try:
             response = await client.post(
                 "https://api.tavily.com/search",
                 json={
                     "api_key": api_key,
                     "query": query,
-                    "search_depth": "advanced",  # Better results for lesser-known companies
+                    "search_depth": "advanced",  # Highest relevance, returns reranked chunks
                     "max_results": max_results,
-                    "include_answer": False,  # We don't need summarization
-                    "include_raw_content": False,  # Keep response small
+                    "chunks_per_source": 3,  # Multiple snippets per source for richer context
+                    "include_answer": False,  # GPT does its own assessment
+                    "include_raw_content": False,  # Not needed for Stage 1 filtering
                 }
             )
             response.raise_for_status()
@@ -412,21 +413,21 @@ def search_tavily_batch_sync(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GPT-4o-mini CLASSIFIER
+# GPT-5-nano CLASSIFIER
 # ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class PresenceAssessment:
     """
-    GPT-4o-mini's assessment of a company's profile and research priority.
+    GPT-5-nano's assessment of a company's profile and research priority.
     
     This is the output of Stage 1 and determines routing to subsequent stages.
     Includes raw API data for logging/auditing.
     """
     company_name: str
     online_presence_score: int  # 1-10
-    research_priority: str  # "high", "medium", "low", "skip"
-    reasoning: str  # Brief explanation for the score
+    research_priority_score: int  # 0-5 (0=not researchable, 5=definitely yields GenAI findings)
+    reasoning: str  # Brief explanation for consistency assessment and priority judgment
     error: Optional[str] = None
     
     # Raw data for logging — not used for routing, but preserved for auditing
@@ -473,20 +474,32 @@ def _build_classifier_prompt(
     company_name: str,
     company_description: Optional[str],
     website_status: WebsiteStatus,
-    search_result: TavilySearchResult
+    search_result: TavilySearchResult,
+    homepage_url: Optional[str] = None,
+    long_description: Optional[str] = None,
 ) -> str:
     """
     Build the user prompt for the classifier.
     
-    Includes full Tavily results for comprehensive assessment.
+    Separates the Crunchbase profile (ground truth) from the search tool
+    output so GPT can assess consistency between them.
     """
-    # Website status (one line)
+    # --- CRUNCHBASE PROFILE section ---
+    profile_lines = [
+        "CRUNCHBASE PROFILE:",
+        f"Company: {company_name}",
+        f"Description: {company_description or 'None'}",
+    ]
+    if long_description and long_description.strip():
+        profile_lines.append(f"About: {long_description.strip()}")
+    profile_lines.append(f"Website: {homepage_url or 'None'}")
+    
+    # --- SEARCH TOOL OUTPUT section ---
     if website_status.is_alive:
         website_info = f"ACTIVE ({website_status.status_code})"
     else:
         website_info = f"DOWN ({website_status.error})"
     
-    # Search results - full content from all snippets
     if search_result.error:
         search_info = f"Search error: {search_result.error}"
     elif search_result.result_count == 0:
@@ -498,14 +511,16 @@ def _build_classifier_prompt(
             snippets.append(f"{i}. {snippet.title}\n   URL: {snippet.url}\n   {snippet.content}")
         search_info = "\n\n".join(snippets)
     
-    prompt = f"""Company: {company_name}
-Description: {company_description or "None"}
-Website: {website_info}
-
-Search results ({search_result.result_count} found):
-
-{search_info}"""
-
+    search_lines = [
+        "SEARCH TOOL OUTPUT:",
+        f'The following results were retrieved by searching only the company name "{company_name}".',
+        f"Website check: {website_info}",
+        f"Results ({search_result.result_count} found):",
+        "",
+        search_info,
+    ]
+    
+    prompt = "\n".join(profile_lines) + "\n\n" + "\n".join(search_lines)
     return prompt
 
 
@@ -514,20 +529,24 @@ async def classify_company(
     company_description: Optional[str],
     website_status: WebsiteStatus,
     search_result: TavilySearchResult,
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None,
+    homepage_url: Optional[str] = None,
+    long_description: Optional[str] = None,
 ) -> PresenceAssessment:
     """
-    Use GPT-4o-mini to assess a company's profile and predict research priority.
+    Use GPT-5-nano to assess a company's profile and predict research priority.
     
     Args:
         company_name: Name of the company.
-        company_description: Crunchbase description (if available).
+        company_description: Crunchbase short description (if available).
         website_status: Result from check_website().
         search_result: Result from search_tavily().
         api_key: OpenAI API key. Uses env var if not provided.
+        homepage_url: Company homepage URL from Crunchbase (for profile context).
+        long_description: Crunchbase long description (if available).
     
     Returns:
-        PresenceAssessment with online_presence_score and research_priority.
+        PresenceAssessment with online_presence_score and research_priority_score.
     """
     import json
     
@@ -539,16 +558,17 @@ async def classify_company(
         return PresenceAssessment(
             company_name=company_name,
             online_presence_score=0,
-            research_priority="skip",
+            research_priority_score=0,
             reasoning="",
             error="OpenAI API key not set. Add to credentials/openai_api_key.txt"
         )
     
     user_prompt = _build_classifier_prompt(
-        company_name, company_description, website_status, search_result
+        company_name, company_description, website_status, search_result,
+        homepage_url=homepage_url, long_description=long_description,
     )
     
-    async with httpx.AsyncClient(timeout=PROCESSING.api_timeout) as client:
+    async with httpx.AsyncClient(timeout=PROCESSING.openai_timeout) as client:
         try:
             response = await client.post(
                 "https://api.openai.com/v1/chat/completions",
@@ -557,13 +577,11 @@ async def classify_company(
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": "gpt-4o-mini",
+                    "model": "gpt-5-nano",
                     "messages": [
                         {"role": "system", "content": CLASSIFIER_SYSTEM_PROMPT},
                         {"role": "user", "content": user_prompt},
                     ],
-                    "temperature": 0.1,  # Low temperature for consistent classification
-                    "max_tokens": 150,  # Lean output: score, priority, reasoning
                     "response_format": {"type": "json_object"},
                 }
             )
@@ -577,7 +595,7 @@ async def classify_company(
             return PresenceAssessment(
                 company_name=company_name,
                 online_presence_score=int(result.get("online_presence_score", 0)),
-                research_priority=result.get("research_priority", "low"),
+                research_priority_score=int(result.get("research_priority_score", 0)),
                 reasoning=result.get("reasoning", ""),
                 user_prompt=user_prompt,
                 raw_gpt_response=data,
@@ -587,7 +605,7 @@ async def classify_company(
             return PresenceAssessment(
                 company_name=company_name,
                 online_presence_score=0,
-                research_priority="skip",
+                research_priority_score=0,
                 reasoning="",
                 error=f"HTTP {e.response.status_code}: {e.response.text[:100]}",
                 user_prompt=user_prompt,
@@ -596,7 +614,7 @@ async def classify_company(
             return PresenceAssessment(
                 company_name=company_name,
                 online_presence_score=0,
-                research_priority="skip",
+                research_priority_score=0,
                 reasoning="",
                 error=f"Failed to parse GPT response: {str(e)}",
                 user_prompt=user_prompt,
@@ -605,7 +623,7 @@ async def classify_company(
             return PresenceAssessment(
                 company_name=company_name,
                 online_presence_score=0,
-                research_priority="skip",
+                research_priority_score=0,
                 reasoning="",
                 error=f"{type(e).__name__}: {str(e)[:100]}",
                 user_prompt=user_prompt,
@@ -617,11 +635,14 @@ def classify_company_sync(
     company_description: Optional[str],
     website_status: WebsiteStatus,
     search_result: TavilySearchResult,
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None,
+    homepage_url: Optional[str] = None,
+    long_description: Optional[str] = None,
 ) -> PresenceAssessment:
     """Synchronous wrapper for classify_company."""
     return asyncio.run(classify_company(
-        company_name, company_description, website_status, search_result, api_key
+        company_name, company_description, website_status, search_result, api_key,
+        homepage_url=homepage_url, long_description=long_description,
     ))
 
 
@@ -646,20 +667,20 @@ class Stage1Result:
     
     # Summary for easy access
     presence_score: int
-    research_priority: str  # "high", "medium", "low", "skip"
+    research_priority_score: int  # 0-5 (0=not researchable, 3+=worth deep research)
     
     # Cost tracking
-    estimated_cost: float = 0.011  # $0.01 Tavily + $0.001 GPT-4o-mini
+    estimated_cost: float = 0.011  # $0.01 Tavily + $0.001 GPT-5-nano
     
     @property
-    def should_continue(self) -> bool:
-        """Should this company proceed to Stage 2?"""
-        return self.research_priority != "skip"
+    def should_deep_research(self) -> bool:
+        """Should this company proceed to deep research? (score >= 3)"""
+        return self.research_priority_score >= 3
     
     @property
     def is_high_priority(self) -> bool:
-        """Is this a high priority company for deep research?"""
-        return self.research_priority == "high"
+        """Is this a high priority company for deep research? (score >= 4)"""
+        return self.research_priority_score >= 4
 
 
 def _build_tavily_log_entry(
@@ -712,7 +733,7 @@ def _build_gpt_log_entry(
         "company_id": result.company_id,
         "company_name": result.company_name,
         "online_presence_score": assess.online_presence_score,
-        "research_priority": assess.research_priority,
+        "research_priority_score": assess.research_priority_score,
         "reasoning": assess.reasoning,
         "error": assess.error,
     }
@@ -723,6 +744,7 @@ async def run_stage_1(
     company_name: str,
     homepage_url: Optional[str],
     company_description: Optional[str],
+    long_description: Optional[str] = None,
     tavily_api_key: Optional[str] = None,
     openai_api_key: Optional[str] = None,
     tavily_log_file: Optional[IO] = None,
@@ -733,26 +755,27 @@ async def run_stage_1(
     
     This orchestrates:
     1. Website health check
-    2. Tavily search for general company information
-    3. GPT-4o-mini analysis to predict research priority
+    2. Tavily search for general company information (name-only query)
+    3. GPT-5-nano analysis comparing search results against Crunchbase profile
     
     Args:
         company_id: Unique identifier (rcid from Crunchbase).
         company_name: Company name.
         homepage_url: Company website URL.
-        company_description: Crunchbase description.
+        company_description: Crunchbase short description.
+        long_description: Crunchbase long description (if available).
         tavily_api_key: Tavily API key.
         openai_api_key: OpenAI API key.
         tavily_log_file: Optional file handle for Tavily JSONL log.
         gpt_log_file: Optional file handle for GPT JSONL log.
     
     Returns:
-        Stage1Result with all component results and research priority.
+        Stage1Result with all component results and research priority score.
     """
     # Step 1: Check website
     website_status = await check_website(homepage_url or "")
     
-    # Step 2: Search for general company information
+    # Step 2: Search for general company information (name-only query)
     search_result = await search_tavily(
         company_name, 
         homepage_url,
@@ -760,13 +783,15 @@ async def run_stage_1(
         api_key=tavily_api_key
     )
     
-    # Step 3: Analyze and assign research priority
+    # Step 3: Analyze and assign research priority (GPT compares search vs Crunchbase profile)
     assessment = await classify_company(
         company_name,
         company_description,
         website_status,
         search_result,
-        api_key=openai_api_key
+        api_key=openai_api_key,
+        homepage_url=homepage_url,
+        long_description=long_description,
     )
     
     result = Stage1Result(
@@ -776,7 +801,7 @@ async def run_stage_1(
         search_result=search_result,
         assessment=assessment,
         presence_score=assessment.online_presence_score,
-        research_priority=assessment.research_priority,
+        research_priority_score=assessment.research_priority_score,
     )
     
     # Write JSONL log entries (separate files for Tavily and GPT)
@@ -798,6 +823,7 @@ def run_stage_1_sync(
     company_name: str,
     homepage_url: Optional[str],
     company_description: Optional[str],
+    long_description: Optional[str] = None,
     tavily_api_key: Optional[str] = None,
     openai_api_key: Optional[str] = None,
     tavily_log_file: Optional[IO] = None,
@@ -806,5 +832,6 @@ def run_stage_1_sync(
     """Synchronous wrapper for run_stage_1."""
     return asyncio.run(run_stage_1(
         company_id, company_name, homepage_url, company_description,
-        tavily_api_key, openai_api_key, tavily_log_file, gpt_log_file
+        long_description, tavily_api_key, openai_api_key,
+        tavily_log_file, gpt_log_file
     ))

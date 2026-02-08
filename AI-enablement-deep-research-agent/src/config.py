@@ -5,9 +5,8 @@ All magic numbers, thresholds, and settings live here.
 Single source of truth for the entire pipeline.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 import os
 
 
@@ -129,14 +128,14 @@ class CostEstimates:
     - Token usage (varies by company description length)
     - Search result complexity
     
-    Last updated: January 2026
+    Last updated: February 2026
     """
-    # Stage 1: Tavily search + GPT-4o-mini interpretation
-    # Tavily: ~$0.01/search on Researcher plan, less on Scale
-    # GPT-4o-mini: ~$0.15/1M input tokens, ~$0.60/1M output tokens
-    tavily_search: float = 0.01       # Conservative estimate
-    gpt4o_mini_call: float = 0.001    # ~500 tokens in, 200 out
-    stage_1_total: float = 0.011      # Tavily dominates the cost
+    # Stage 1: Tavily search + GPT-5-nano interpretation
+    # Tavily: ~$0.02/search (advanced depth, 2 credits)
+    # GPT-5-nano: ~$0.05/1M input tokens, ~$0.40/1M output tokens
+    tavily_search: float = 0.02       # Advanced depth = 2 credits
+    gpt5_nano_call: float = 0.0002    # ~800 input + ~600 completion (incl. reasoning)
+    stage_1_total: float = 0.020      # Tavily dominates the cost
 
     # Stage 2A: Perplexity Sonar Base (llama-3.1-sonar-small)
     # $0.20/1M input, $0.20/1M output + $5/1000 searches
@@ -165,28 +164,13 @@ class CostEstimates:
 class EscalationThresholds:
     """
     Decision thresholds for routing companies through the pipeline.
-
-    Based on the 2x2 matrix:
-        - Online Presence Score (0-100)
-        - AI Mentions Found (boolean)
+    
+    Research priority score (0-5) determines routing:
+    - 0-2: No deep research (not worth it)
+    - 3-5: Proceed to deep research
     """
-    # Presence score boundaries
-    low_presence_max: int = 30      # 0-30 = low presence
-    medium_presence_max: int = 70   # 31-70 = medium presence
-    # 71-100 = high presence
-
-    # Confidence thresholds for findings
-    high_confidence_min: float = 0.8
-    medium_confidence_min: float = 0.5
-
-    def get_presence_tier(self, score: int) -> Literal["low", "medium", "high"]:
-        """Classify presence score into tier."""
-        if score <= self.low_presence_max:
-            return "low"
-        elif score <= self.medium_presence_max:
-            return "medium"
-        else:
-            return "high"
+    # Research priority score threshold for deep research
+    deep_research_min_score: int = 3  # Score >= 3 triggers deep research
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -201,12 +185,13 @@ class ProcessingConfig:
     batch_size: int = 100
 
     # Timeouts (seconds)
-    http_timeout: float = 10.0
-    api_timeout: float = 30.0
+    http_timeout: float = 10.0       # Website health checks
+    tavily_timeout: float = 30.0     # Tavily API calls
+    openai_timeout: float = 120.0    # GPT-5-nano needs headroom for reasoning tokens
 
-    # Rate limiting (requests per minute)
-    tavily_rpm: int = 60
-    openai_rpm: int = 500
+    # Rate limiting (requests per minute) — set to 95% of actual limits for safety
+    tavily_rpm: int = 950       # Actual limit: 1000 RPM
+    openai_rpm: int = 28500     # Actual limit: 30,000 RPM (gpt-5-nano)
     perplexity_rpm: int = 60
 
     # Checkpointing
