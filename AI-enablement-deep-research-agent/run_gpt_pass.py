@@ -24,11 +24,15 @@ Usage:
     python run_gpt_pass.py                           # Use default tavily_results.jsonl
     python run_gpt_pass.py --input custom.jsonl      # Custom Tavily JSONL
     python run_gpt_pass.py --tag v2                  # Tag output as gpt_v2.jsonl
+    python run_gpt_pass.py --concurrency 50          # Override concurrency limit
+    python run_gpt_pass.py --retry-errors             # Re-classify previously failed companies
 """
 
 import argparse
 import asyncio
 import json
+import logging
+import signal
 import sys
 import time
 from datetime import datetime
@@ -39,7 +43,7 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.config import (
-    PROCESSING, STAGE1_OUTPUT_DIR, STAGE1_GPT_DIR,
+    PROCESSING, STAGE1_OUTPUT_DIR, STAGE1_GPT_DIR, LOG_DIR,
     APIKeys,
 )
 from src.common import AsyncJSONLWriter, AsyncRateLimiter
@@ -49,6 +53,36 @@ from src.stage_1 import (
     SearchSnippet,
     classify_company,
 )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOGGING SETUP
+# ─────────────────────────────────────────────────────────────────────────────
+
+def setup_logging(log_dir: Path) -> logging.Logger:
+    """Configure dual logging: stdout + persistent log file."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = log_dir / f"gpt_pass_{timestamp}.log"
+
+    logger = logging.getLogger("gpt_pass")
+    logger.setLevel(logging.INFO)
+
+    fh = logging.FileHandler(log_file)
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(logging.Formatter(
+        "%(asctime)s | %(levelname)-7s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(logging.Formatter("%(message)s"))
+
+    logger.addHandler(fh)
+    logger.addHandler(ch)
+
+    logger.info(f"Log file: {log_file}")
+    return logger
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -73,11 +107,16 @@ def load_tavily_records(jsonl_path: Path) -> list[dict]:
     return records
 
 
-def load_existing_rcids(jsonl_path: Path) -> set[int]:
-    """Scan existing GPT JSONL for already-classified rcids."""
-    seen = set()
+def load_existing_records(jsonl_path: Path) -> tuple[set[int], set[int]]:
+    """
+    Scan existing GPT JSONL and return (successful_rcids, error_rcids).
+
+    A record is considered an error if its 'error' field is non-null.
+    """
+    successful = set()
+    errored = set()
     if not jsonl_path.exists():
-        return seen
+        return successful, errored
     with open(jsonl_path, "r") as f:
         for line in f:
             line = line.strip()
@@ -85,10 +124,14 @@ def load_existing_rcids(jsonl_path: Path) -> set[int]:
                 continue
             try:
                 obj = json.loads(line)
-                seen.add(int(obj["rcid"]))
+                rcid = int(obj["rcid"])
+                if obj.get("error"):
+                    errored.add(rcid)
+                else:
+                    successful.add(rcid)
             except (json.JSONDecodeError, KeyError, ValueError):
                 continue
-    return seen
+    return successful, errored
 
 
 def reconstruct_website_status(record: dict) -> WebsiteStatus:
@@ -109,7 +152,7 @@ def reconstruct_tavily_result(record: dict) -> TavilySearchResult:
     raw = tv.get("raw_response", {})
 
     snippets = []
-    for r in raw.get("results", []):
+    for r in (raw or {}).get("results", []):
         snippets.append(SearchSnippet(
             title=r.get("title", ""),
             url=r.get("url", ""),
@@ -144,6 +187,30 @@ def build_gpt_record(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# GRACEFUL SHUTDOWN
+# ─────────────────────────────────────────────────────────────────────────────
+
+class GracefulShutdown:
+    """Signal handler for clean Ctrl+C shutdown."""
+
+    def __init__(self, logger: logging.Logger):
+        self.shutdown_requested = False
+        self.force_exit = False
+        self.logger = logger
+
+    def handler(self, signum, frame):
+        if self.shutdown_requested:
+            self.logger.warning("Force shutdown requested. Exiting immediately.")
+            self.force_exit = True
+            sys.exit(1)
+        self.shutdown_requested = True
+        self.logger.warning(
+            "Graceful shutdown requested (Ctrl+C). "
+            "Finishing current batch... Press Ctrl+C again to force exit."
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -153,6 +220,10 @@ async def main():
     parser.add_argument("--tag", type=str, default=None,
                         help="Version tag for output file (e.g. 'v2' -> gpt_v2.jsonl)")
     parser.add_argument("--limit", type=int, default=None, help="Process only first N records")
+    parser.add_argument("--concurrency", type=int, default=50,
+                        help="Max concurrent requests (default: 50, GPT-5-nano is fast)")
+    parser.add_argument("--retry-errors", action="store_true",
+                        help="Re-classify companies that previously failed with errors")
     args = parser.parse_args()
 
     tavily_path = Path(args.input) if args.input else TAVILY_JSONL
@@ -169,36 +240,57 @@ async def main():
         output_name = f"gpt_{timestamp}.jsonl"
     output_path = STAGE1_GPT_DIR / output_name
 
+    logger = setup_logging(LOG_DIR)
+
+    # Graceful shutdown handler
+    shutdown = GracefulShutdown(logger)
+    signal.signal(signal.SIGINT, shutdown.handler)
+
     # Load API keys
     keys = APIKeys()
     if not keys.openai:
-        print("ERROR: OpenAI API key not found. Add to credentials/openai_api_key.txt")
+        logger.error("OpenAI API key not found. Add to credentials/openai_api_key.txt")
         sys.exit(1)
 
     # Load Tavily records
-    print(f"Loading Tavily results from {tavily_path}...")
+    logger.info(f"Loading Tavily results from {tavily_path}...")
     records = load_tavily_records(tavily_path)
-    print(f"  Total Tavily records: {len(records)}")
+    logger.info(f"  Total Tavily records: {len(records)}")
+
+    # Skip Tavily records that have errors (no point classifying them)
+    records = [r for r in records if not r.get("tavily", {}).get("error")]
+    logger.info(f"  Tavily records with valid search results: {len(records)}")
 
     if args.limit:
         records = records[:args.limit]
-        print(f"  Limited to first {args.limit}")
+        logger.info(f"  Limited to first {args.limit}")
 
     # Check existing progress
-    existing = load_existing_rcids(output_path)
-    if existing:
-        print(f"  Already classified: {len(existing)} (resuming)")
-    remaining = [r for r in records if int(r["rcid"]) not in existing]
-    print(f"  Remaining to classify: {len(remaining)}")
+    successful, errored = load_existing_records(output_path)
+    if successful:
+        logger.info(f"  Already classified successfully: {len(successful)}")
+    if errored:
+        logger.info(f"  Previously failed with errors: {len(errored)}")
+
+    # Determine which records to process
+    if args.retry_errors:
+        skip = successful
+        logger.info(f"  --retry-errors: will re-classify {len(errored)} failed companies")
+    else:
+        skip = successful | errored
+
+    remaining = [r for r in records if int(r["rcid"]) not in skip]
+    logger.info(f"  Remaining to classify: {len(remaining)}")
 
     if not remaining:
-        print("\nAll records already classified. Nothing to do.")
+        logger.info("\nAll records already classified. Nothing to do.")
         return
 
     # Cost estimate (GPT-5-nano is very cheap)
     cost = len(remaining) * 0.0002
-    print(f"\nEstimated GPT cost: ${cost:.3f} ({len(remaining)} calls x $0.0002)")
-    print(f"Output: {output_path}")
+    logger.info(f"\nEstimated GPT cost: ${cost:.3f} ({len(remaining)} calls x $0.0002)")
+    logger.info(f"Output: {output_path}")
+    logger.info(f"Concurrency: {args.concurrency}")
 
     input("\nPress Enter to start (or Ctrl+C to cancel)...")
 
@@ -208,7 +300,7 @@ async def main():
 
     # Rate limiter + concurrency semaphore
     openai_limiter = AsyncRateLimiter(rpm=PROCESSING.openai_rpm, name="openai")
-    semaphore = asyncio.Semaphore(PROCESSING.max_concurrent_requests)
+    semaphore = asyncio.Semaphore(args.concurrency)
 
     start_time = time.time()
     processed = 0
@@ -250,9 +342,11 @@ async def main():
                     score = assessment.research_priority_score
                     if 0 <= score <= 5:
                         score_dist[score] += 1
-                    print(f"  [{idx}/{len(remaining)}] {name}: "
-                          f"P{score} (presence={assessment.online_presence_score}) "
-                          f"— {assessment.reasoning[:50]}")
+                    logger.info(
+                        f"  [{idx}/{len(remaining)}] {name}: "
+                        f"P{score} (presence={assessment.online_presence_score}) "
+                        f"— {assessment.reasoning[:50]}"
+                    )
 
                 except Exception as e:
                     errors += 1
@@ -262,12 +356,16 @@ async def main():
                         "reasoning": "", "error": f"{type(e).__name__}: {str(e)[:200]}",
                     }
                     await writer.write(error_record)
-                    print(f"  [{idx}/{len(remaining)}] {name}: ERROR — {e}")
+                    logger.error(f"  [{idx}/{len(remaining)}] {name}: ERROR — {e}")
 
         try:
             # Process in batches for progress reporting
             batch_size = 200
             for batch_start in range(0, len(remaining), batch_size):
+                if shutdown.shutdown_requested:
+                    logger.warning("Shutdown: stopping after current batch completes.")
+                    break
+
                 batch = remaining[batch_start:batch_start + batch_size]
                 tasks = [
                     classify_one(record, batch_start + j + 1)
@@ -280,10 +378,12 @@ async def main():
                 done = batch_start + len(batch)
                 rate = processed / elapsed if elapsed > 0 else 0
                 eta = (len(remaining) - done) / rate if rate > 0 else 0
-                print(f"\n  --- Progress: {done}/{len(remaining)} | "
-                      f"{rate:.1f}/sec | ETA: {eta/60:.0f}min | "
-                      f"Errors: {errors} | "
-                      f"Rate limiter: {openai_limiter.stats} ---\n")
+                logger.info(
+                    f"\n  --- Progress: {done}/{len(remaining)} | "
+                    f"{rate:.1f}/sec | ETA: {eta/60:.0f}min | "
+                    f"Errors: {errors} | "
+                    f"Rate limiter: {openai_limiter.stats} ---\n"
+                )
 
         finally:
             await openai_client.aclose()
@@ -291,13 +391,13 @@ async def main():
     elapsed = time.time() - start_time
 
     # Summary
-    print(f"\n{'='*60}")
-    print(f"  GPT pass complete")
-    print(f"  Processed: {processed}/{len(remaining)} ({errors} errors)")
-    print(f"  Time: {elapsed:.1f}s ({processed/elapsed:.1f}/sec)")
-    print(f"  Output: {output_path}")
+    logger.info(f"\n{'='*60}")
+    logger.info(f"  GPT pass complete")
+    logger.info(f"  Processed: {processed}/{len(remaining)} ({errors} errors)")
+    logger.info(f"  Time: {elapsed:.1f}s ({processed/elapsed:.1f}/sec)" if elapsed > 0 else "")
+    logger.info(f"  Output: {output_path}")
 
-    print(f"\n  Score distribution:")
+    logger.info(f"\n  Score distribution:")
     labels = {
         5: "5 (definitely yields)",
         4: "4 (potentially yields)",
@@ -310,12 +410,16 @@ async def main():
         count = score_dist[score]
         pct = count / processed * 100 if processed else 0
         bar = "█" * int(pct / 2)
-        print(f"    {labels[score]:25} {count:4} ({pct:5.1f}%) {bar}")
+        logger.info(f"    {labels[score]:25} {count:4} ({pct:5.1f}%) {bar}")
 
     deep = sum(score_dist[s] for s in [3, 4, 5])
-    print(f"\n  Deep research candidates (>= 3): {deep}/{processed} "
-          f"({deep/processed*100:.0f}%)" if processed else "")
-    print(f"{'='*60}")
+    if processed:
+        logger.info(f"\n  Deep research candidates (>= 3): {deep}/{processed} "
+                    f"({deep/processed*100:.0f}%)")
+
+    if errors:
+        logger.info(f"\n  Tip: run with --retry-errors to re-classify {errors} failed companies")
+    logger.info(f"{'='*60}")
 
 
 if __name__ == "__main__":
