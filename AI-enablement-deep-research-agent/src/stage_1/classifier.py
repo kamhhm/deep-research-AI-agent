@@ -118,10 +118,17 @@ def _build_classifier_prompt(
         "SEARCH TOOL OUTPUT:",
         f'The following results were retrieved by searching only the company name "{company_name}".',
         f"Website check: {website_info}",
+    ]
+    
+    # Include Tavily's LLM-generated summary if available
+    if search_result.answer:
+        search_lines.append(f"Search summary: {search_result.answer}")
+    
+    search_lines.extend([
         f"Results ({search_result.result_count} found):",
         "",
         search_info,
-    ]
+    ])
     
     prompt = "\n".join(profile_lines) + "\n\n" + "\n".join(search_lines)
     return prompt

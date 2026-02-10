@@ -160,6 +160,7 @@ def build_tavily_record(
         },
         "tavily": {
             "query": sr.query,
+            "answer": sr.answer,
             "result_count": sr.result_count,
             "raw_response": sr.raw_response,
             "error": sr.error,

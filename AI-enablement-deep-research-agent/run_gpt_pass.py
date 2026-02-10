@@ -160,11 +160,15 @@ def reconstruct_tavily_result(record: dict) -> TavilySearchResult:
             score=r.get("score", 0.0),
         ))
 
+    # Answer may come from the explicit field or from raw_response (backward compat)
+    answer = tv.get("answer") or (raw or {}).get("answer") or None
+
     return TavilySearchResult(
         company_name=record.get("name", ""),
         query=tv.get("query", ""),
         snippets=snippets,
         result_count=tv.get("result_count", 0),
+        answer=answer,
         raw_response=raw or None,
         error=tv.get("error"),
     )

@@ -42,6 +42,7 @@ class TavilySearchResult:
     query: str
     snippets: list[SearchSnippet]
     result_count: int
+    answer: Optional[str] = None  # Tavily's LLM-generated summary of the search
     raw_response: Optional[dict] = None
     error: Optional[str] = None
 
@@ -69,7 +70,7 @@ def build_search_query(
     Returns:
         Natural language search query string.
     """
-    return f"provide me information on the company {company_name}"
+    return f"Find information on the company {company_name}"
 
 
 async def search_tavily(
@@ -122,7 +123,7 @@ async def search_tavily(
                 "search_depth": "advanced",  # Highest relevance, returns reranked chunks
                 "max_results": max_results,
                 "chunks_per_source": 3,  # Multiple snippets per source for richer context
-                "include_answer": False,  # GPT does its own assessment
+                "include_answer": "advanced",  # Detailed LLM-generated summary to guide GPT classification
                 "include_raw_content": False,  # Not needed for Stage 1 filtering
             }
         )
@@ -145,6 +146,7 @@ async def search_tavily(
             query=query,
             snippets=snippets,
             result_count=len(snippets),
+            answer=data.get("answer") or None,
             raw_response=data,
         )
     
