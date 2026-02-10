@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stage 1 Results | GenAI Adoption Research</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #faf9f7;
+            --bg-secondary: #ffffff;
+            --bg-accent: #f5f3f0;
+            --bg-code: #1e1e1e;
+            --text-primary: #1a1a1a;
+            --text-secondary: #4a4a4a;
+            --text-muted: #8a8a8a;
+            --border: #e5e3df;
+            --stage-1: #3b82f6;
+            --tavily: #8b5cf6;
+            --gpt: #059669;
+            --font-serif: 'Cormorant Garamond', Georgia, serif;
+            --font-sans: 'Inter', -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.7;
+            font-size: 16px;
+        }
+        ::selection { background: #c9a959; color: white; }
+
+        /* Navigation */
+        nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100vh;
+            width: 220px;
+            padding: 3rem 2rem;
+            background: var(--bg-primary);
+            border-right: 1px solid var(--border);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+        .nav-brand {
+            font-family: var(--font-serif);
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 3rem;
+        }
+        .nav-section { margin-bottom: 2rem; }
+        .nav-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-muted);
+            margin-bottom: 0.75rem;
+        }
+        .nav-links { list-style: none; }
+        .nav-links li { margin-bottom: 0.5rem; }
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: color 0.2s;
+        }
+        .nav-links a:hover { color: var(--text-primary); }
+
+        /* Main Content */
+        main { margin-left: 220px; min-height: 100vh; }
+        section {
+            padding: 5rem 4rem;
+            max-width: 1000px;
+            margin: 0 auto;
+            border-bottom: 1px solid var(--border);
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 0.8s ease, transform 0.8s ease;
+        }
+        section:last-of-type { border-bottom: none; }
+        section.visible { opacity: 1; transform: translateY(0); }
+
+        /* Typography */
+        h1 {
+            font-family: var(--font-serif);
+            font-size: clamp(2.5rem, 5vw, 3.5rem);
+            font-weight: 400;
+            letter-spacing: -0.02em;
+            line-height: 1.2;
+            margin-bottom: 1.5rem;
+        }
+        h2 {
+            font-family: var(--font-serif);
+            font-size: clamp(1.8rem, 3vw, 2.2rem);
+            font-weight: 400;
+            margin-bottom: 1.5rem;
+        }
+        h3 {
+            font-family: var(--font-serif);
+            font-size: 1.3rem;
+            font-weight: 500;
+            margin-bottom: 0.75rem;
+        }
+        h4 {
+            font-family: var(--font-sans);
+            font-size: 0.85rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.75rem;
+            color: var(--text-muted);
+        }
+        p {
+            color: var(--text-secondary);
+            font-size: 1rem;
+            max-width: 700px;
+            margin-bottom: 1.5rem;
+        }
+        .label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            display: block;
+        }
+        .large-text {
+            font-family: var(--font-serif);
+            font-size: 1.25rem;
+            line-height: 1.8;
+            color: var(--text-secondary);
+        }
+
+        /* Hero */
+        #hero {
+            min-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .hero-stats {
+            display: flex;
+            gap: 4rem;
+            margin-top: 4rem;
+            padding-top: 3rem;
+            border-top: 1px solid var(--border);
+        }
+        .stat-value {
+            font-family: var(--font-serif);
+            font-size: 2.5rem;
+            font-weight: 400;
+            line-height: 1;
+            margin-bottom: 0.5rem;
+        }
+        .stat-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-muted);
+        }
+
+        /* Stage Detail Boxes */
+        .stage-detail {
+            margin: 2.5rem 0;
+            padding: 2rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-left: 4px solid;
+        }
+        .stage-detail.tavily { border-left-color: var(--tavily); }
+        .stage-detail.gpt { border-left-color: var(--gpt); }
+        .stage-detail.s1 { border-left-color: var(--stage-1); }
+        .stage-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1.5rem;
+        }
+        .stage-badge {
+            font-size: 0.7rem;
+            font-weight: 500;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .stage-badge.tavily { background: #ede9fe; color: #6d28d9; }
+        .stage-badge.gpt { background: #d1fae5; color: #065f46; }
+        .stage-badge.s1 { background: #dbeafe; color: #1e40af; }
+
+        /* Code Blocks */
+        .code-block {
+            background: var(--bg-code);
+            border-radius: 8px;
+            margin: 1.5rem 0;
+            overflow: hidden;
+        }
+        .code-header {
+            padding: 0.75rem 1rem;
+            background: #2d2d2d;
+            border-bottom: 1px solid #3d3d3d;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: #888;
+            display: flex;
+            justify-content: space-between;
+        }
+        pre {
+            padding: 1.25rem;
+            overflow-x: auto;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            line-height: 1.6;
+            color: #d4d4d4;
+            margin: 0;
+        }
+        .code-comment { color: #6a9955; }
+        .code-keyword { color: #569cd6; }
+        .code-string { color: #ce9178; }
+        .code-number { color: #b5cea8; }
+        .code-type { color: #4ec9b0; }
+
+        /* Prompt Display */
+        .prompt-display {
+            background: var(--bg-accent);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin: 1.5rem 0;
+            overflow: hidden;
+        }
+        .prompt-header {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.8rem;
+            font-weight: 500;
+            background: var(--bg-secondary);
+        }
+        .prompt-content {
+            padding: 1.25rem;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            color: var(--text-secondary);
+        }
+
+        /* Flowchart */
+        .flowchart {
+            margin: 3rem 0;
+            padding: 3rem 2rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+        }
+        .flowchart-title {
+            font-family: var(--font-serif);
+            font-size: 1.1rem;
+            margin-bottom: 2.5rem;
+            text-align: center;
+            color: var(--text-muted);
+        }
+        .flow-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .flow-node {
+            padding: 1.25rem 2.5rem;
+            border-radius: 10px;
+            text-align: center;
+            font-size: 1rem;
+            font-weight: 600;
+            min-width: 320px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .flow-node .subtitle {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: 400;
+            opacity: 0.8;
+            margin-top: 0.25rem;
+            font-family: var(--font-mono);
+        }
+        .flow-node.input { background: #f8fafc; border: 2px solid #94a3b8; color: #475569; }
+        .flow-node.tavily { background: #ede9fe; border: 3px solid var(--tavily); color: #5b21b6; }
+        .flow-node.gpt { background: #d1fae5; border: 3px solid var(--gpt); color: #065f46; }
+        .flow-node.output { background: #1e293b; border: 3px solid #1e293b; color: #f8fafc; }
+        .flow-arrow {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 0.75rem 0;
+        }
+        .flow-arrow .shaft {
+            width: 4px;
+            height: 50px;
+            background: linear-gradient(180deg, #94a3b8 0%, #475569 100%);
+            border-radius: 2px;
+        }
+        .flow-arrow .head {
+            width: 0;
+            height: 0;
+            border-left: 12px solid transparent;
+            border-right: 12px solid transparent;
+            border-top: 16px solid #475569;
+        }
+        .flow-arrow .arrow-label {
+            margin-top: 0.5rem;
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            color: #64748b;
+            background: #f1f5f9;
+            padding: 0.3rem 0.75rem;
+            border-radius: 4px;
+            border: 1px solid #e2e8f0;
+        }
+
+        /* Bar Chart */
+        .chart-container {
+            margin: 2rem 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 2rem;
+        }
+        .chart-title {
+            font-family: var(--font-serif);
+            font-size: 1.1rem;
+            margin-bottom: 1.5rem;
+        }
+        .bar-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.75rem;
+            gap: 1rem;
+        }
+        .bar-label {
+            width: 200px;
+            font-size: 0.85rem;
+            text-align: right;
+            flex-shrink: 0;
+        }
+        .bar-track {
+            flex: 1;
+            height: 32px;
+            background: var(--bg-accent);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+        .bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            padding-left: 8px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: white;
+            min-width: fit-content;
+            transition: width 1.5s ease;
+        }
+        .bar-fill.score-5 { background: #059669; }
+        .bar-fill.score-4 { background: #10b981; }
+        .bar-fill.score-3 { background: #f59e0b; }
+        .bar-fill.score-2 { background: #94a3b8; }
+        .bar-fill.score-1 { background: #cbd5e1; }
+        .bar-fill.score-0 { background: #e2e8f0; color: #64748b; }
+        .bar-fill.presence-high { background: #3b82f6; }
+        .bar-fill.presence-mid { background: #60a5fa; }
+        .bar-fill.presence-low { background: #cbd5e1; color: #64748b; }
+        .bar-value {
+            width: 100px;
+            font-size: 0.8rem;
+            font-family: var(--font-mono);
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+
+        /* Key Insight Boxes */
+        .insight-box {
+            margin: 2rem 0;
+            padding: 1.5rem;
+            background: #f0fdf4;
+            border: 1px solid #86efac;
+            border-radius: 8px;
+        }
+        .insight-box h4 { color: #166534; margin-bottom: 0.75rem; }
+        .insight-box p { font-size: 0.95rem; margin-bottom: 0.5rem; }
+        .insight-box p:last-child { margin-bottom: 0; }
+
+        .decision-box {
+            margin: 2rem 0;
+            padding: 1.5rem;
+            background: #f0f9ff;
+            border: 1px solid #3b82f6;
+            border-radius: 8px;
+        }
+        .decision-box h4 { color: #1e40af; margin-bottom: 0.75rem; }
+        .decision-box ul { margin-left: 1.5rem; color: var(--text-secondary); font-size: 0.95rem; }
+        .decision-box li { margin-bottom: 0.5rem; }
+
+        .tradeoff-box {
+            margin: 2rem 0;
+            padding: 1.5rem;
+            background: #fffbeb;
+            border: 1px solid #fbbf24;
+            border-radius: 8px;
+        }
+        .tradeoff-box h4 { color: #92400e; margin-bottom: 0.75rem; }
+        .tradeoff-box p { margin-bottom: 0.75rem; font-size: 0.95rem; }
+        .tradeoff-box p:last-child { margin-bottom: 0; }
+
+        /* Data Table */
+        .data-table {
+            margin-top: 2rem;
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+        .data-table th, .data-table td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        .data-table th {
+            font-weight: 500;
+            color: var(--text-muted);
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            background: var(--bg-accent);
+        }
+
+        /* Summary Grid */
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+        .summary-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem;
+            text-align: center;
+        }
+        .summary-card .value {
+            font-family: var(--font-serif);
+            font-size: 2rem;
+            font-weight: 400;
+            margin-bottom: 0.25rem;
+        }
+        .summary-card .desc {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .summary-card.highlight {
+            border-color: var(--gpt);
+            background: #f0fdf4;
+        }
+
+        /* Footer */
+        footer {
+            padding: 4rem;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+        footer p { max-width: none; margin: 0 auto 0.5rem; }
+
+        /* Responsive */
+        @media (max-width: 1100px) {
+            nav { display: none; }
+            main { margin-left: 0; }
+            section { padding: 3rem 2rem; }
+            .hero-stats { flex-wrap: wrap; gap: 2rem; }
+            .summary-grid { grid-template-columns: repeat(2, 1fr); }
+            .bar-label { width: 140px; font-size: 0.75rem; }
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="nav-section">
+            <div class="nav-label">Sections</div>
+            <ul class="nav-links">
+                <li><a href="#hero">Overview</a></li>
+                <li><a href="#pipeline">Pipeline</a></li>
+                <li><a href="#tavily">Tavily Search</a></li>
+                <li><a href="#gpt">GPT Classification</a></li>
+                <li><a href="#results">Results</a></li>
+            </ul>
+        </div>
+        <div class="nav-section" style="margin-top: auto;">
+            <div class="nav-label">Advisor</div>
+            <p style="font-size: 0.9rem; color: var(--text-secondary); margin: 0;">Prof. Jan Bena</p>
+        </div>
+    </nav>
+
+    <main>
+        <!-- HERO -->
+        <section id="hero">
+            <span class="label">Stage 1 Complete &mdash; February 2026</span>
+            <h1>Research Priority Classification<br>of 44,385 Startups</h1>
+            <p class="large-text">
+                Stage 1 of the GenAI adoption pipeline is complete. Every company in the Crunchbase dataset has been searched via Tavily and classified by GPT-5-nano to determine whether an expensive deep research call is worth the cost.
+            </p>
+            <div class="hero-stats">
+                <div class="stat">
+                    <div class="stat-value">44,385</div>
+                    <div class="stat-label">Companies Processed</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">24,159</div>
+                    <div class="stat-label">Deep Research Candidates</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">$560</div>
+                    <div class="stat-label">Stage 1 Total Cost</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- PIPELINE -->
+        <section id="pipeline">
+            <span class="label">System Design</span>
+            <h2>Stage 1 Pipeline</h2>
+            <p>
+                Stage 1 is a two-pass architecture. Tavily and GPT are fully decoupled &mdash; we can re-run GPT classification with different prompts without re-running Tavily, enabling fast iteration on the scoring criteria.
+            </p>
+
+            <div class="flowchart">
+                <div class="flowchart-title">Stage 1 Data Flow</div>
+                <div class="flow-container">
+
+                    <div class="flow-node input">
+                        44,387 Companies
+                        <span class="subtitle">Crunchbase CSV (name, description, URL)</span>
+                    </div>
+
+                    <div class="flow-arrow">
+                        <div class="shaft"></div>
+                        <div class="head"></div>
+                        <div class="arrow-label">Pass 1: Web search</div>
+                    </div>
+
+                    <div class="flow-node tavily">
+                        Tavily Web Search
+                        <span class="subtitle">Name-only query &middot; Advanced depth &middot; 5 results + LLM summary</span>
+                    </div>
+
+                    <div class="flow-arrow">
+                        <div class="shaft"></div>
+                        <div class="head"></div>
+                        <div class="arrow-label">tavily_results.jsonl (44,387 records)</div>
+                    </div>
+
+                    <div class="flow-node gpt">
+                        GPT-5-nano Classification
+                        <span class="subtitle">Compares Tavily results against Crunchbase profile</span>
+                    </div>
+
+                    <div class="flow-arrow">
+                        <div class="shaft"></div>
+                        <div class="head"></div>
+                        <div class="arrow-label">gpt_full_44k.jsonl (44,385 classified)</div>
+                    </div>
+
+                    <div class="flow-node output">
+                        Score Distribution &rarr; Stage 2 Routing
+                        <span class="subtitle">Priority 3-5 proceed &middot; Priority 0-2 stop</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAVILY -->
+        <section id="tavily">
+            <span class="label">Pass 1</span>
+            <h2>Tavily Web Search</h2>
+            <p>
+                For each company, Tavily searches the web using only the company name. This is deliberate: if a company can't be found by name alone, the deep research API (which also searches by name) won't find it either.
+            </p>
+
+            <div class="stage-detail tavily">
+                <div class="stage-header">
+                    <h3>Design Decisions</h3>
+                    <span class="stage-badge tavily">Tavily API</span>
+                </div>
+
+                <table class="data-table" style="margin-top: 0;">
+                    <tbody>
+                        <tr>
+                            <td style="font-weight: 500; width: 180px;">Query format</td>
+                            <td><code style="font-family: var(--font-mono); font-size: 0.85rem;">"Find information on the company {name}"</code></td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 500;">Search depth</td>
+                            <td><strong>Advanced</strong> &mdash; returns reranked, higher-relevance results (2 credits/search)</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 500;">Max results</td>
+                            <td>5 results per company</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 500;">Chunks per source</td>
+                            <td>3 &mdash; multiple snippets per source for richer context</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 500;">Include answer</td>
+                            <td><strong>Advanced</strong> &mdash; Tavily's LLM generates a detailed company summary from search results</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 500;">Website check</td>
+                            <td>HEAD request to homepage URL (alive/dead status)</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: 500;">Cost</td>
+                            <td>~$0.011 per company &times; 44,387 = $500 total</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="tradeoff-box">
+                <h4>Why name-only queries?</h4>
+                <p>We tested multiple query strategies (including URLs, descriptions, and AI-focused keywords). Name-only queries serve a dual purpose: they retrieve general company information <em>and</em> act as a findability test. If a company has a generic name like "Den" or "Way", the search returns unrelated results &mdash; which tells GPT this company is not researchable.</p>
+            </div>
+
+            <h3 style="margin-top: 3rem;">Sample Tavily Output</h3>
+            <p>Each company gets a JSONL record with website status, search results, and an LLM-generated summary.</p>
+
+            <div class="code-block">
+                <div class="code-header">
+                    <span>tavily_results.jsonl</span>
+                    <span>Automata Practice Development</span>
+                </div>
+                <pre>{
+  <span class="code-string">"name"</span>: <span class="code-string">"Automata Practice Development"</span>,
+  <span class="code-string">"short_description"</span>: <span class="code-string">"Integrates business process automation within accounting practices"</span>,
+  <span class="code-string">"homepage_url"</span>: <span class="code-string">"https://automatapracdev.com"</span>,
+  <span class="code-string">"website_check"</span>: { <span class="code-string">"is_alive"</span>: <span class="code-keyword">true</span>, <span class="code-string">"status_code"</span>: <span class="code-number">200</span> },
+  <span class="code-string">"tavily"</span>: {
+    <span class="code-string">"query"</span>: <span class="code-string">"Find information on the company Automata Practice Development"</span>,
+    <span class="code-string">"answer"</span>: <span class="code-string">"Automata Practice Development is a California-based firm that
+      creates managed robotic process automation (RPA) solutions
+      specifically for accounting practices, automating routine tasks
+      to boost efficiency, accuracy and capacity..."</span>,
+    <span class="code-string">"result_count"</span>: <span class="code-number">5</span>,
+    <span class="code-string">"results"</span>: [
+      { <span class="code-string">"title"</span>: <span class="code-string">"Automata Practice Development: Home - Accounting Automation"</span>,
+        <span class="code-string">"url"</span>: <span class="code-string">"https://automatapracdev.com/"</span>, ... },
+      { <span class="code-string">"title"</span>: <span class="code-string">"Wesley Hartman - Automata Practice Development - LinkedIn"</span>,
+        <span class="code-string">"url"</span>: <span class="code-string">"https://linkedin.com/posts/wesley-hartman..."</span>, ... },
+      { <span class="code-string">"title"</span>: <span class="code-string">"Automata Raises $45M Series C to Build the Operating ..."</span>,
+        <span class="code-string">"url"</span>: <span class="code-string">"https://businesswire.com/news/..."</span>, ... },
+      <span class="code-comment">// ... 2 more results</span>
+    ]
+  }
+}</pre>
+            </div>
+        </section>
+
+        <!-- GPT CLASSIFICATION -->
+        <section id="gpt">
+            <span class="label">Pass 2</span>
+            <h2>GPT-5-nano Classification</h2>
+            <p>
+                GPT receives the Tavily results alongside the Crunchbase profile and performs two assessments: how much information is available online (presence), and whether a deep research call is worth the cost (priority).
+            </p>
+
+            <div class="stage-detail gpt">
+                <div class="stage-header">
+                    <h3>Classification Logic</h3>
+                    <span class="stage-badge gpt">GPT-5-nano</span>
+                </div>
+                <p style="font-size: 0.95rem;">The core logic is a <strong>consistency check</strong>: GPT compares Tavily search results against the Crunchbase profile. If results describe a different entity (common with generic names), research priority drops to 0-1.</p>
+                <p style="font-size: 0.95rem;">For scores 4-5, the classifier also looks for <strong>AI/tech-forward signals</strong> in the search results &mdash; mentions of automation, AI tools, modern engineering, or operating in a space where AI adoption is common. This applies to any industry.</p>
+            </div>
+
+            <h3 style="margin-top: 2rem;">Research Priority Score (0-5)</h3>
+
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width: 60px;">Score</th>
+                        <th>Criteria</th>
+                        <th style="width: 100px;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>5</strong></td>
+                        <td>Exact match + excellent presence + <strong>direct AI/tech-forward signals</strong>. Deep research will definitely yield findings.</td>
+                        <td style="color: #059669; font-weight: 500;">Deep research</td>
+                    </tr>
+                    <tr>
+                        <td><strong>4</strong></td>
+                        <td>Exact match + strong presence + <strong>company appears tech-forward or innovative</strong>. Deep research potentially yields findings.</td>
+                        <td style="color: #059669; font-weight: 500;">Deep research</td>
+                    </tr>
+                    <tr>
+                        <td><strong>3</strong></td>
+                        <td>Exact match + decent presence + <strong>no particular tech signal</strong>. Unlikely to yield findings, but worth a shot.</td>
+                        <td style="color: #f59e0b; font-weight: 500;">Deep research</td>
+                    </tr>
+                    <tr>
+                        <td><strong>2</strong></td>
+                        <td>Partial match, weak presence. Some footprint exists but not worth the cost.</td>
+                        <td style="color: #94a3b8;">Skip</td>
+                    </tr>
+                    <tr>
+                        <td><strong>1</strong></td>
+                        <td>Results mostly describe unrelated entities. Barely any signal.</td>
+                        <td style="color: #94a3b8;">Skip</td>
+                    </tr>
+                    <tr>
+                        <td><strong>0</strong></td>
+                        <td>No results, or entirely about unrelated entities. Not researchable.</td>
+                        <td style="color: #94a3b8;">Skip</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3 style="margin-top: 3rem;">Sample GPT Output</h3>
+
+            <div class="code-block">
+                <div class="code-header">
+                    <span>gpt_full_44k.jsonl</span>
+                    <span>Automata Practice Development &mdash; Score 4</span>
+                </div>
+                <pre>{
+  <span class="code-string">"rcid"</span>: <span class="code-number">26928483</span>,
+  <span class="code-string">"name"</span>: <span class="code-string">"Automata Practice Development"</span>,
+  <span class="code-string">"online_presence_score"</span>: <span class="code-number">7</span>,
+  <span class="code-string">"research_priority_score"</span>: <span class="code-number">4</span>,
+  <span class="code-string">"reasoning"</span>: <span class="code-string">"Results describe Automata Practice Development and
+    its accounting automation/RPA focus, aligning with the Crunchbase
+    profile. There is an active site, founder activity, and industry
+    coverage suggesting tech-forward operations; a deep research call
+    is likely to uncover GenAI adoption signals."</span>
+}</pre>
+            </div>
+
+            <div class="insight-box">
+                <h4>Key design decisions</h4>
+                <p><strong>4 few-shot examples</strong> anchor the model: score 5 (Sardine, fintech with AI signals), score 4 (Paramify, automation SaaS), score 2 (GreenLeaf, small traditional consulting), score 0 (Den, unrelated results).</p>
+                <p><strong>Conservative bias</strong>: The prompt explicitly states that GenAI adoption evidence is "extremely rare" and that "most companies should score 0-2."</p>
+                <p><strong>USE vs BUILD distinction</strong>: We want companies that adopt AI tools in their operations, not companies that build or sell AI products.</p>
+            </div>
+        </section>
+
+        <!-- RESULTS -->
+        <section id="results">
+            <span class="label">Statistical Summary</span>
+            <h2>Classification Results</h2>
+
+            <div class="summary-grid">
+                <div class="summary-card">
+                    <div class="value">44,373</div>
+                    <div class="desc">Successfully Classified</div>
+                </div>
+                <div class="summary-card">
+                    <div class="value">12</div>
+                    <div class="desc">Errors (API failures)</div>
+                </div>
+                <div class="summary-card highlight">
+                    <div class="value">24,159</div>
+                    <div class="desc">Deep Research Candidates</div>
+                </div>
+                <div class="summary-card">
+                    <div class="value">54.4%</div>
+                    <div class="desc">Candidate Rate</div>
+                </div>
+            </div>
+
+            <!-- Research Priority Distribution -->
+            <div class="chart-container">
+                <div class="chart-title">Research Priority Score Distribution</div>
+
+                <div class="bar-row">
+                    <div class="bar-label">5 &mdash; Definitely yields</div>
+                    <div class="bar-track">
+                        <div class="bar-fill score-5" style="width: 9.9%;">9.9%</div>
+                    </div>
+                    <div class="bar-value">4,413</div>
+                </div>
+                <div class="bar-row">
+                    <div class="bar-label">4 &mdash; Potentially yields</div>
+                    <div class="bar-track">
+                        <div class="bar-fill score-4" style="width: 11.3%;">11.3%</div>
+                    </div>
+                    <div class="bar-value">5,007</div>
+                </div>
+                <div class="bar-row">
+                    <div class="bar-label">3 &mdash; Worth a shot</div>
+                    <div class="bar-track">
+                        <div class="bar-fill score-3" style="width: 33.2%;">33.2%</div>
+                    </div>
+                    <div class="bar-value">14,739</div>
+                </div>
+                <div class="bar-row">
+                    <div class="bar-label">2 &mdash; Not worth it</div>
+                    <div class="bar-track">
+                        <div class="bar-fill score-2" style="width: 26.8%;">26.8%</div>
+                    </div>
+                    <div class="bar-value">11,884</div>
+                </div>
+                <div class="bar-row">
+                    <div class="bar-label">1 &mdash; Mostly unrelated</div>
+                    <div class="bar-track">
+                        <div class="bar-fill score-1" style="width: 6.9%;">6.9%</div>
+                    </div>
+                    <div class="bar-value">3,075</div>
+                </div>
+                <div class="bar-row">
+                    <div class="bar-label">0 &mdash; Not researchable</div>
+                    <div class="bar-track">
+                        <div class="bar-fill score-0" style="width: 11.8%;">11.8%</div>
+                    </div>
+                    <div class="bar-value">5,255</div>
+                </div>
+            </div>
+
+            <!-- Online Presence Distribution -->
+            <div class="chart-container">
+                <div class="chart-title">Online Presence Score Distribution</div>
+
+                <div class="bar-row">
+                    <div class="bar-label">9-10 (Strong)</div>
+                    <div class="bar-track">
+                        <div class="bar-fill presence-high" style="width: 5.3%;">5.3%</div>
+                    </div>
+                    <div class="bar-value">2,368</div>
+                </div>
+                <div class="bar-row">
+                    <div class="bar-label">7-8 (Good)</div>
+                    <div class="bar-track">
+                        <div class="bar-fill presence-high" style="width: 37.6%;">37.6%</div>
+                    </div>
+                    <div class="bar-value">16,692</div>
+                </div>
+                <div class="bar-row">
+                    <div class="bar-label">5-6 (Moderate)</div>
+                    <div class="bar-track">
+                        <div class="bar-fill presence-mid" style="width: 30.5%;">30.5%</div>
+                    </div>
+                    <div class="bar-value">13,530</div>
+                </div>
+                <div class="bar-row">
+                    <div class="bar-label">3-4 (Minimal)</div>
+                    <div class="bar-track">
+                        <div class="bar-fill presence-low" style="width: 17.0%;">17.0%</div>
+                    </div>
+                    <div class="bar-value">7,524</div>
+                </div>
+                <div class="bar-row">
+                    <div class="bar-label">1-2 (None)</div>
+                    <div class="bar-track">
+                        <div class="bar-fill presence-low" style="width: 9.6%;">9.6%</div>
+                    </div>
+                    <div class="bar-value">4,259</div>
+                </div>
+            </div>
+
+            <!-- Cost Breakdown -->
+            <div class="chart-container">
+                <div class="chart-title">Stage 1 Cost Breakdown</div>
+                <table class="data-table" style="margin-top: 0;">
+                    <thead>
+                        <tr>
+                            <th>Component</th>
+                            <th>Unit Cost</th>
+                            <th>Volume</th>
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Tavily web search (advanced)</td>
+                            <td>$0.011</td>
+                            <td>44,387</td>
+                            <td><strong>$500</strong></td>
+                        </tr>
+                        <tr>
+                            <td>GPT-5-nano classification</td>
+                            <td>$0.0014</td>
+                            <td>44,385</td>
+                            <td><strong>$60</strong></td>
+                        </tr>
+                        <tr style="background: var(--bg-accent);">
+                            <td colspan="3" style="text-align: right; font-weight: 600;">Stage 1 Total</td>
+                            <td><strong>$560</strong></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <footer>
+            <p>Stage 1: Research Priority Classification</p>
+            <p style="color: var(--text-muted);">UBC Sauder School of Business &middot; February 2026</p>
+        </footer>
+    </main>
+
+    <script>
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) entry.target.classList.add('visible');
+            });
+        }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
+        document.querySelectorAll('section').forEach(s => observer.observe(s));
+        document.getElementById('hero').classList.add('visible');
+    </script>
+</body>
+</html>
